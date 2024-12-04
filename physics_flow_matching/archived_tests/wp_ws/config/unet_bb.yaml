@@ -1,0 +1,37 @@
+device: cuda
+exp_num: 5
+path: "/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/wp_ws/exps/bb_exps"
+th_seed: 786
+np_seed: 786
+
+unet:
+  dim: [1, 10, 200]
+  num_channels: 128
+  channel_mult: [1, 2]
+  res_blocks: 2
+  head_chans: 64
+  attn_res: "40,20"
+  dropout: 0.2
+  new_attn: True
+  film: True
+
+dataloader:
+  wppath: "/home/xiantao/case/wall_pressure/bigchannel/data/channel_180_wall_pressure.npy"
+  wspath: "/home/xiantao/case/wall_pressure/bigchannel/data/channel_180_wall_dudy.npy"
+  batch_size: 16
+  cutoff: 10
+  dataset: WPWS
+
+optimizer:
+  lr: 1e-4
+
+scheduler:
+  T_max: 100
+  eta_min: 1e-6
+
+num_epochs: 30
+print_epoch_int: 1
+save_epoch_int: 5
+print_with_epoch_int: 10
+restart: False
+restart_epoch:

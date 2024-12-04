@@ -1,0 +1,40 @@
+device: cuda
+exp_num: 1
+path: "/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/vf_vf/exps"
+th_seed: 786
+np_seed: 786
+
+unet:
+  dim: [3, 160, 200]
+  num_channels: 128
+  res_blocks: 2
+  head_chans: 64
+  attn_res: "40,20,10"
+  dropout: 0.2
+  new_attn: True
+  film: True
+
+dataloader:
+  u_inpp: "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y40_41-220_out.npy"
+  u_outp: "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y70_41-220_out.npy"
+  v_inpp: "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_v_y40_41-220_out.npy"
+  v_outp: "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_v_y70_41-220_out.npy"
+  w_inpp: "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_w_y40_41-220_out.npy"
+  w_outp: "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_w_y70_41-220_out.npy"
+  batch_size: 8
+  cutoff: 160
+  dataset: VFVF
+
+optimizer:
+  lr: 1e-4
+
+scheduler:
+  T_max: 100
+  eta_min: 1e-6
+
+num_epochs: 100
+print_epoch_int: 1
+save_epoch_int: 5
+print_with_epoch_int: 10
+restart: False
+restart_epoch:

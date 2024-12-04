@@ -1,0 +1,86 @@
+device: cuda
+exp_num: 1
+path: "/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/multi_pretrain/exps/vf_vf/y_corr/32_by_32_time_len"
+th_seed: 786
+np_seed: 786
+
+unet:
+  dim: [1, 32, 32]
+  out_channels: 1
+  y_channels: 2
+  num_channels: 128
+  channel_mult: null
+  res_blocks: 2
+  head_chans: 64
+  attn_res: "64"
+  dropout: 0.0
+  new_attn: True
+  film: True
+
+dataloader:
+  vf_paths: [
+              ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y5_all_out.npy',],
+              ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y40_all_out.npy',]       
+            ]
+  # vf_paths: [
+  #             # ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y5_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y5_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y5_all_out.npy'],
+  #             ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y10_all_out.npy',],
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y10_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y10_all_out.npy'],
+  #             ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y20_all_out.npy',]
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y20_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y20_all_out.npy'],
+  #             # ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y40_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y40_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y40_all_out.npy'],
+  #             # ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y60_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y60_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y60_all_out.npy'],
+  #             # ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y70_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y70_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y70_all_out.npy'],
+  #             # ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y80_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y80_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y80_all_out.npy'],
+  #             # ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y100_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y100_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y100_all_out.npy'],
+  #             # ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y120_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y120_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y120_all_out.npy'],
+  #             # ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_u_y150_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_v_y150_all_out.npy',
+  #             # '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/channel_180_w_y150_all_out.npy'],              
+  #           ]
+  # vf_paths: [
+  #             ["/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/u5_small.npy",
+  #             "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/v5_small.npy",
+  #             "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/w5_small.npy"],
+  #             ["/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/u10_small.npy",
+  #             "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/v10_small.npy",
+  #             "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/w10_small.npy"],
+  #           ]
+  batch_size: 512
+  time_cutoff: 36000
+  cutoff: 40
+  jump: 3600
+  wall_norm_dict : { 0: [5., 40.]}
+  patch_dims : [32, 32]
+  dataset: VFVF_P
+
+optimizer:
+  lr: 1e-4
+
+scheduler:
+  T_max: 100
+  eta_min: 1e-6
+
+num_epochs: 500 #100
+print_epoch_int: 1
+save_epoch_int: 50 #5
+print_with_epoch_int: 10
+# rolling_steps: 3
+restart: True
+restart_epoch: 99

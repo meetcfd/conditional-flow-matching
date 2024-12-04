@@ -1,0 +1,48 @@
+device: cuda
+exp_num: 4
+path: "/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/wm_ar/exps"
+th_seed: 786
+np_seed: 786
+
+unet:
+  dim: [1, 160, 200]
+  out_channels: 1
+  num_channels: 128
+  res_blocks: 2
+  head_chans: 64
+  attn_res: "40,20"
+  dropout: 0.0
+  new_attn: True
+  film: True
+
+dataloader:
+  wm_paths: ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_wall_dudy_all_out.npy'] 
+  v_int_paths: [
+              '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y5_all_out.npy',
+              '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y10_all_out.npy',
+              '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y40_all_out.npy',
+              '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y60_all_out.npy',
+              '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y70_all_out.npy',
+              '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y80_all_out.npy',
+              '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y100_all_out.npy',
+              '/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y150_all_out.npy']
+  batch_size: 3
+  rolling_steps: 3
+  cutoff: 160
+  time_cutoff: 1200
+  dataset: WMARR
+
+optimizer:
+  lr: 1e-4
+
+scheduler:
+  T_max: 100
+  eta_min: 1e-6
+
+num_epochs: 20
+print_epoch_int: 1
+save_epoch_int: 1
+print_with_epoch_int: 10
+rolling_steps: 3
+restart: False
+restart_epoch:

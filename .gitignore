@@ -154,6 +154,8 @@ wandb/
 slurm*.out
 
 # Data and models
+events.*
+*.pth
 *.pt
 *.h5
 *.h5ad

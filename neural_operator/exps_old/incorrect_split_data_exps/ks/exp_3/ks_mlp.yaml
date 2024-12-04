@@ -1,0 +1,31 @@
+device: cuda
+exp_num: 3
+path: "/home/meet/FlowMatchingTests/conditional-flow-matching/neural_operator/exps/ks"
+th_seed: 786
+np_seed: 786
+
+model:
+  blocks_dim_lst: [[32, 256, 256], [256, 256, 256], [256, 256, 256], [256, 256, 256], [256, 256, 32]]
+  embedding_mlp_lst: [1, 3, 3]
+  cond_mult: 4
+  act_func: RELU
+
+FM:
+  sigma: 0.1
+  return_noise: False
+
+dataloader:
+  datapath: "/home/meet/FlowMatchingTests/conditional-flow-matching/neural_operator/data/ks_data.npy"
+  split_ratio: 0.8
+  train_batch_size: 1024
+  test_batch_size: 512
+
+optimizer:
+  lr: 1e-3
+
+num_epochs: 10_000
+print_epoch_int: 10
+save_epoch_int: 100
+print_with_epoch_int: 128
+restart: False
+restart_epoch: None
