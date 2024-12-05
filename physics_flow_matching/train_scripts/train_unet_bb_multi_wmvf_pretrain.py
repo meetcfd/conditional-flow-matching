@@ -6,7 +6,7 @@ import os
 import torch as th
 import numpy as np
 from physics_flow_matching.unet.unet_bb import UNetModelWrapper as UNetModel
-from physics_flow_matching.utils.dataloader import get_loaders_wmvf_multi
+from physics_flow_matching.utils.dataloader import get_loaders_wmvf_patch
 from physics_flow_matching.utils.dataset import DATASETS
 from physics_flow_matching.utils.train_bb import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
@@ -38,12 +38,14 @@ def main(config_path):
     
     writer = SummaryWriter(log_dir=logpath)
     
-    train_dataloader, test_dataloader = get_loaders_wmvf_multi(config.dataloader.wm_paths,
-                                        config.dataloader.vf_paths,
-                                        config.dataloader.batch_size,
-                                        config.dataloader.time_cutoff,
-                                        config.dataloader.cutoff,
-                                        DATASETS[config.dataloader.dataset])
+    train_dataloader, test_dataloader = get_loaders_wmvf_patch(wm_paths=config.dataloader.wm_paths,
+                                        vf_paths=config.dataloader.vf_paths,
+                                        batch_size=config.dataloader.batch_size,
+                                        time_cutoff=config.dataloader.time_cutoff,
+                                        cutoff=config.dataloader.cutoff,
+                                        patch_dims=config.dataloader.patch_dims,
+                                        dataset_=DATASETS[config.dataloader.dataset],
+                                        jump=config.dataloader.jump)
         
     model = UNetModel(dim=config.unet.dim,
                       out_channels=config.unet.out_channels,

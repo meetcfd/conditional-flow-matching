@@ -118,38 +118,58 @@ from einops import rearrange
 #         batch = index // len(self.wall_norm_dict)
 #         return self.wall_norm_dict[ind], self.inp[batch], self.out[batch, ind:ind+1]
 
-class WMVF(Dataset):
-    def __init__(self, data, wall_norm_dict, cutoff=160) -> None:
+# class WMVF(Dataset):
+#     def __init__(self, data, wall_norm_dict, cutoff=160) -> None:
+#         super().__init__()
+#         self._preprocess(data, cutoff, 'data')
+#         self.wall_norm_dict = wall_norm_dict
+        
+#     def _preprocess(self, data, cutoff, name):
+#         data = (data[:, :, :cutoff]) if cutoff else data
+#         setattr(self, name, (data).astype(np.float32))
+               
+#     def __len__(self):  
+#         return self.data.shape[0]
+    
+#     def __getitem__(self, index):
+#         ind = index % len(self.wall_norm_dict)
+#         batch = index // len(self.wall_norm_dict)
+#         return self.wall_norm_dict[ind], self.data[batch, :3], self.data[batch, 3:]
+    
+# class WMVF_M(Dataset):
+#     def __init__(self, data, cutoff=160) -> None:
+#         super().__init__()
+#         self._preprocess(data, cutoff, 'data')
+        
+#     def _preprocess(self, data, cutoff, name):
+#         data = (data[:, :, :cutoff]) if cutoff else data
+#         setattr(self, name, (data).astype(np.float32))
+               
+#     def __len__(self):  
+#         return self.data.shape[0]
+    
+#     def __getitem__(self, index):
+#         return self.data[index, :3], self.data[index, 3:]
+    
+class WMVF_P(Dataset):
+    def __init__(self, data, patch_dims,
+                 cutoff=160) -> None:
         super().__init__()
-        self._preprocess(data, cutoff, 'data')
-        self.wall_norm_dict = wall_norm_dict
+        self._preprocess(data, cutoff,'data')
+        self.patch_dims = patch_dims
+        self.space_ress = self.data.shape[-2:]
         
     def _preprocess(self, data, cutoff, name):
-        data = (data[:, :, :cutoff]) if cutoff else data
+        data = (data[:, :, : ,:cutoff]) if cutoff else data
         setattr(self, name, (data).astype(np.float32))
                
     def __len__(self):  
         return self.data.shape[0]
     
     def __getitem__(self, index):
-        ind = index % len(self.wall_norm_dict)
-        batch = index // len(self.wall_norm_dict)
-        return self.wall_norm_dict[ind], self.data[batch, :3], self.data[batch, 3:]
-    
-class WMVF_M(Dataset):
-    def __init__(self, data, cutoff=160) -> None:
-        super().__init__()
-        self._preprocess(data, cutoff, 'data')
-        
-    def _preprocess(self, data, cutoff, name):
-        data = (data[:, :, :cutoff]) if cutoff else data
-        setattr(self, name, (data).astype(np.float32))
-               
-    def __len__(self):  
-        return self.data.shape[0]
-    
-    def __getitem__(self, index):
-        return self.data[index, :3], self.data[index, 3:]
+        start_indices = [np.random.randint(0,space_res-patch_dim) if space_res > patch_dim else 0 for space_res, patch_dim in zip(self.space_ress, self.patch_dims)]
+        patch_x, patch_y = (slice(start_index, start_index+patch_dim) for start_index, patch_dim in zip(start_indices,self.patch_dims))
+        return self.data[index, 1, ..., patch_x, patch_y], self.data[index, 0, ..., patch_x, patch_y]
     
 # class WSVF(Dataset):
 #     def __init__(self, ws_u, vel_y,
@@ -312,7 +332,10 @@ class WMAR_rollout(Dataset):
         time_ind = index // (self.data.shape[1] - self.rolling_steps)
         return self.data[time_ind, pair_ind:pair_ind+1], self.data[time_ind, pair_ind+1:pair_ind+self.rolling_steps+1]
 
-DATASETS = {"WP":None,"KS":None, "WPWS":None, "WPWS_DD":None, "WMVF":WMVF, "WMVF_M": WMVF_M,"WSVF":None, "VFVF":VFVF, "VFVF_P":VFVF_patchify,
+DATASETS = {"WP":None,"KS":None, "WPWS":None, "WPWS_DD":None,
+            "WMVF":None, "WMVF_M": None, "WMVF_P": WMVF_P,
+            "WSVF":None,
+            "VFVF":VFVF, "VFVF_P":VFVF_patchify,
             "VFVF_P2": VFVF_patchify_2,
             "WMAR":WMAR, "WMARR":WMAR_rollout}
 

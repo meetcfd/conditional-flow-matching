@@ -92,6 +92,39 @@ def get_loaders_wmvf_multi(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
 
     return train_dataloader, test_dataloader
 
+def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, patch_dims, dataset_, jump=1):
+    
+    def norm(d, m, s):
+        return (d-m)/s
+    
+    wm_data = []
+    for pxy_path in wm_paths:
+        pxy_data = []    
+        for path in pxy_path:
+            d = np.load(path)
+            pxy_data.append(d)   
+        wm_data.append(pxy_data)
+    wm_data = np.concat(wm_data, axis=1)[:, None]
+    
+    vf_data = []  
+    for uvw_path in vf_paths:
+        uvw_data = []    
+        for path in uvw_path:
+            d = np.load(path)
+            uvw_data.append(d)   
+        vf_data.append(uvw_data)
+    vf_data = np.concat(vf_data, axis=1)[:, None]
+    
+    data = np.concatenate([wm_data, vf_data], axis=1)
+    m, s = np.mean(data, axis=(0,3,4), keepdims=True), np.std(data, axis=(0,3,4), keepdims=True)
+    
+    data = norm(data, m, s)
+
+    train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump], patch_dims, cutoff), batch_size=batch_size, shuffle=True)
+    test_dataloader = DataLoader(dataset_(data[-1000:], patch_dims, cutoff), batch_size=batch_size, shuffle=True)
+
+    return train_dataloader, test_dataloader
+
 # def get_loaders_wsvf(ws_u_path, vf_path, batch_size, cutoff, wall_norm_dict, dataset_):
     
 #     def norm(d, m, s):
