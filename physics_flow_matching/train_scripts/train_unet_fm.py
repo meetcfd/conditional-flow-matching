@@ -5,8 +5,8 @@ import os
 
 import torch as th
 import numpy as np
-from physics_flow_matching.unet import UNetModel
-from physics_flow_matching.utils.dataloader import get_loaders
+from physics_flow_matching.unet.unet import UNetModelWrapper as UNetModel
+from physics_flow_matching.utils.dataloader import get_loaders_vf_fm
 from physics_flow_matching.utils.dataset import DATASETS
 from physics_flow_matching.utils.train import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
@@ -39,9 +39,10 @@ def main(config_path):
     
     writer = SummaryWriter(log_dir=logpath)
     
-    train_dataloader = get_loaders(config.dataloader.datapath,
-                                                    config.dataloader.batch_size,
-                                                    DATASETS[config.dataloader.dataset])
+    train_dataloader = get_loaders_vf_fm(vf_paths=config.dataloader.datapath,
+                                        batch_size=config.dataloader.batch_size,
+                                        dataset_=DATASETS[config.dataloader.dataset],
+                                        jump=config.dataloader.jump)
         
     model = UNetModel(dim=config.unet.dim,
                       num_channels=config.unet.num_channels,
@@ -59,7 +60,7 @@ def main(config_path):
     
     optim = Adam(model.parameters(), lr=config.optimizer.lr)
     
-    sched =  None#CosineAnnealingLR(optim, config.scheduler.T_max, config.scheduler.eta_min)
+    sched = None#CosineAnnealingLR(optim, config.scheduler.T_max, config.scheduler.eta_min)
     
     loss_fn = DD_loss
     

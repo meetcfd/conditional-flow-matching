@@ -1,5 +1,5 @@
 device: cuda
-exp_num: 7
+exp_num: 4
 path: "/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/multi_pretrain/exps/wm_vf"
 th_seed: 786
 np_seed: 786
@@ -20,9 +20,9 @@ dataloader:
   wm_paths: [["/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_wall_pressure_all_out.npy",
             "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_wall_dudy_all_out.npy",
             "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_wall_dwdy_all_out.npy"]]
-  vf_paths: [["/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y20_all_out.npy",
-            "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_v_y20_all_out.npy",
-            "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_w_y20_all_out.npy"]]
+  vf_paths: [["/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y40_all_out.npy",
+            "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_v_y40_all_out.npy",
+            "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_w_y40_all_out.npy"]]
   # wm_paths: ['/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/wall_pressure_small.npy', 
   #           "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/wall_dudy_small.npy",
   #           "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/small_piece/wall_dwdy_small.npy"]

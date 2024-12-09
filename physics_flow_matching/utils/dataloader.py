@@ -1,6 +1,29 @@
 import numpy as np
 from torch.utils.data import DataLoader
 
+def quickload(fp, csize):
+    
+    def load_npy_in_chunks(filepath, chunk_size):
+        """Load a .npy file in chunks using memory mapping."""
+
+        with open(filepath, 'rb') as f:
+            version = np.lib.format.read_magic(f)
+            shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(f)
+
+        # Calculate number of chunks
+            num_chunks = np.ceil(shape[0] / chunk_size).astype(int)
+
+            for i in range(num_chunks):
+                start = i * chunk_size
+                end = min((i + 1) * chunk_size, shape[0])
+
+                # Use memory mapping to load the chunk
+                chunk = np.memmap(filepath, dtype=dtype, mode='r', shape=(end - start,) + shape[1:], offset=f.tell())
+
+                yield chunk
+    
+    return np.concat([c for c in load_npy_in_chunks(fp, csize)])
+            
 # def get_loaders(datapath, batch_size, dataset_):
     
 #     data = np.load(datapath)
@@ -104,7 +127,11 @@ def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
             d = np.load(path)
             pxy_data.append(d)   
         wm_data.append(pxy_data)
-    wm_data = np.concat(wm_data, axis=1)[:, None]
+    if len(wm_data) == 1:    
+        wm_data = np.concat(wm_data[0], axis=1)[:, None]
+    else:
+        wm_data = [np.concat(wm, axis=1) for wm in wm_data]
+        wm_data = np.stack(wm_data, axis=1)
     
     vf_data = []  
     for uvw_path in vf_paths:
@@ -113,7 +140,11 @@ def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
             d = np.load(path)
             uvw_data.append(d)   
         vf_data.append(uvw_data)
-    vf_data = np.concat(vf_data, axis=1)[:, None]
+    if len(vf_data) == 1:
+        vf_data = np.concat(vf_data[0], axis=1)[:, None]
+    else:
+        vf_data = [np.concat(vf, axis=1) for vf in vf_data]
+        vf_data = np.stack(vf_data, axis=1)
     
     data = np.concatenate([wm_data, vf_data], axis=1)
     m, s = np.mean(data, axis=(0,3,4), keepdims=True), np.std(data, axis=(0,3,4), keepdims=True)
@@ -208,6 +239,25 @@ def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
        
     
 #     return train_dataloader, test_dataloader
+
+def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1):
+    
+    def norm(d, m, s):
+        return (d-m)/s
+
+    data = []
+    for path in vf_paths:
+        d = np.load(path)
+        data.append(d)   
+
+    data = np.concatenate(data, axis=1)
+    m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
+    
+    data = norm(data, m, s)
+
+    train_dataloader = DataLoader(dataset_(data[::jump]), batch_size=batch_size, shuffle=True)
+       
+    return train_dataloader
 
 def get_loaders_vfvf(vf_paths, batch_size, time_cutoff, cutoff, wall_norm_dict, patch_dims, dataset_, jump=1):
     
