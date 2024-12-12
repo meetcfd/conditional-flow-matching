@@ -194,24 +194,16 @@ class FlowMatcher:
             return t, xt, ut, eps
         else:
             return t, xt, ut
-
-    def compute_lambda(self, t):
-        """Compute the lambda function, see Eq.(23) [3].
-
-        Parameters
-        ----------
-        t : FloatTensor, shape (bs)
-
-        Returns
-        -------
-        lambda : score weighting function
-
-        References
-        ----------
-        [4] Simulation-free Schrodinger bridges via score and flow matching, Preprint, Tong et al.
-        """
-        sigma_t = self.compute_sigma_t(t)
-        return 2 * sigma_t / (self.sigma**2 + 1e-8)
+    
+    def compute_lambda_and_beta(self, t):
+        """https://arxiv.org/pdf/2411.07625"""
+        b_t = self.compute_sigma_t(t)
+        a_t = t
+        da_t = 1
+        db_t = self.sigma - 1
+        lmbda = db_t/b_t
+        beta = a_t*(da_t - db_t/b_t * a_t)
+        return lmbda, beta, a_t, b_t
     
 class ConditionalFlowMatcher:
     """Base class for conditional flow matching methods. This class implements the independent

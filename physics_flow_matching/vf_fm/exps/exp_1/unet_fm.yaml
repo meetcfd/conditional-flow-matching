@@ -1,5 +1,5 @@
 device: cuda
-exp_num: 2
+exp_num: 1
 path: "/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/vf_fm/exps"
 th_seed: 786
 np_seed: 786
@@ -20,9 +20,9 @@ FM:
   return_noise: False
 
 dataloader:
-  datapath: ["/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y40_all_out.npy",
-            "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_v_y40_all_out.npy",
-            "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_w_y40_all_out.npy"]
+  datapath: ["/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_u_y20_all_out.npy",
+            "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_v_y20_all_out.npy",
+            "/home/xiantao/case/wall_pressure/bigchannel/data/to_meet/channel_180_w_y20_all_out.npy"]
   batch_size: 10
   jump: 1
   dataset: VF_FM
