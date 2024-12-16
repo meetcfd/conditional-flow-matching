@@ -3,26 +3,58 @@ import torch
 from tqdm import tqdm
 from functools import partial
 from torchcfm.conditional_flow_matching import FlowMatcher, pad_t_like_x
+from torchdiffeq import odeint
+from torch.optim import LBFGS
 
+def d_flow(
+    cost_func,
+    measurement_func,
+    measurement,
+    flow_model,
+    initial_point,
+    ode_solver=odeint,
+    ode_solver_kwargs={"method": "midpoint", "t" : torch.linspace(0,1,2), "options": {"step_size": 1/6}},
+    optimizer=LBFGS,
+    optimizer_kwargs={"line_search_fn": "strong_wolfe"},
+    max_iterations=10,
+    **kwargs
+):
+    """
+    Implements the D-Flow algorithm for controlled generation (https://arxiv.org/pdf/2402.14017).
 
-def inpainting(x_hat, **kwargs):
-    slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"]),
-    # mask = kwargs["mask"]
-    return x_hat[..., slice_x, slice_y]#x_hat * mask ## has no effect on the conditioning
+    Args:
+        cost_function: The cost function to be minimized.
+        flow_model: The pre-trained flow model.
+        initial_point: The initial point for optimization.
+        ode_solver: The ODE solver to use. Default is torchdiffeq.odeint.
+        ode_solver_kwargs: Keyword arguments for the ODE solver.
+                            Default is {"method": "midpoint", "options": {"step_size": 1/6}}.
+        optimizer: The optimization algorithm to use. Default is torch.optim.LBFGS.
+        optimizer_kwargs: Keyword arguments for the optimizer.
+                          Default is {"line_search_fn": "strong_wolfe"}.
+        max_iterations: The maximum number of optimization iterations.
 
-def grad_cost_func(meas_func, x, measurement, **kwargs):
-    
-    if kwargs["is_grad_free"]:
-        a_t, b_t, x_gauss = kwargs["grad_free"]["a_t"], kwargs["grad_free"]["b_t"], kwargs["grad_free"]["x_gauss"]
-        x_hat = 1/a_t * (x - b_t * x_gauss)
-    else:
-        t, v = kwargs["grad"]["t"], kwargs["grad"]["v"]
-        x_hat = x + (1 - t)*v
-        
-    pred_measurement = meas_func(x_hat, **kwargs)
-    diff = pred_measurement - measurement
-    diff_norm = torch.linalg.norm(diff.flatten())
-    return torch.autograd.grad(diff_norm, x)[0], diff_norm.item()
+    Returns:
+        The generated sample after optimization.
+    """
+
+    initial_point = torch.nn.Parameter(initial_point)
+
+    def closure():
+        optimizer.zero_grad()
+        generated_sample = ode_solver(
+            flow_model, initial_point, **ode_solver_kwargs
+        )[-1]
+        loss = cost_func(measurement_func, generated_sample, measurement, **kwargs)
+        loss.backward()
+        return loss
+
+    optimizer = optimizer([initial_point], **optimizer_kwargs)
+
+    for _ in tqdm(range(max_iterations)):
+        optimizer.step(closure)
+
+    return (ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1]).detach().cpu().numpy()
 
 def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
                 samples_per_batch, total_samples, dims_of_img, 
