@@ -6,6 +6,59 @@ from torchcfm.conditional_flow_matching import FlowMatcher, pad_t_like_x
 from torchdiffeq import odeint
 from torch.optim import LBFGS
 
+def oc_flow(f_p, cost_fn, meas_fn, measurement,
+            max_iterations, lr,
+            beta, num_of_steps, size,
+            device, **kwargs):
+    """
+    Implements Algorithm 1: OC-Flow on Euclidean Space. (https://arxiv.org/pdf/2410.18070)
+    """
+
+    reward_fn = lambda x: -cost_fn(meas_fn, x, measurement, **kwargs)
+    ts = torch.linspace(0, 1, num_of_steps, device=device)
+    dt = ts[1] - ts[0]
+
+    x0 = torch.randn(1, *size, device=device) 
+
+    # Initialize control terms
+    theta = torch.zeros(num_of_steps, *x0.shape, device=device)  
+
+    # Optimization loop
+    for _ in tqdm(range(max_iterations)):
+        with torch.no_grad():
+            # Solve for the state trajectory (Euler discretization)
+            x_prev = x0
+            for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
+                x_t = x_prev + (f_p(t, x_prev) + theta[i]) * dt  
+                x_prev = x_t # Update x_prev for the next iteration
+        
+        # Calculate the gradient (adjoint method)
+        x_prev = x_prev.requires_grad_()
+        grad_x_t = torch.autograd.grad(reward_fn(x_prev), x_prev, retain_graph=False)[0]  
+        grad_x = [grad_x_t]
+        for j, t in enumerate(list(reversed(ts))):  # Iterate in reverse from the second element
+            if t == 1:
+                continue
+            with torch.no_grad():
+                x_t = x0 # Recompute x_t for memory efficiency
+                for i, t_forward in enumerate(ts[:j]):
+                    x_t = x_t + (f_p(t_forward, x_t) + theta[i]) * dt
+            x_t = x_t.requires_grad_()
+            grad_x_t = torch.autograd.functional.vjp(f_p, inputs=(t, x_t), v=grad_x_t)[1][1]
+            grad_x.append(grad_x_t)
+        # Update control (no need to store the entire grad_x)
+        grad_x = torch.stack(grad_x[::-1])
+        theta = beta * theta + lr * grad_x
+
+    # Solve for the final state trajectory with optimized control
+    with torch.no_grad():
+        x_prev = x0
+        for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
+            x_t = x_prev + (f_p(t, x_prev) + theta[i]) * dt
+            x_prev = x_t # Update x_prev for the next iteration
+    
+    return x_prev.detach().cpu().numpy()
+
 def d_flow(
     cost_func,
     measurement_func,
@@ -78,7 +131,7 @@ def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
         
         x = torch.randn(samples_size, device=device)
         
-        for t in tqdm(ts):
+        for t in tqdm(ts[:-1]):
             _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
             beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
                              pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
@@ -127,7 +180,7 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
         x_gauss = x.clone().detach()
         first_step = True
                 
-        for t in tqdm(ts):
+        for t in tqdm(ts[:-1]):
             _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
             beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
                              pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
@@ -180,7 +233,7 @@ def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
         x = torch.randn(samples_size, device=device)
         first_step = True
                 
-        for t in tqdm(ts):
+        for t in tqdm(ts[:-1]):
             _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
             beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
                              pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
