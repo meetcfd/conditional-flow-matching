@@ -6,6 +6,99 @@ from torchcfm.conditional_flow_matching import FlowMatcher, pad_t_like_x
 from torchdiffeq import odeint
 from torch.optim import LBFGS
 
+def flowgrad(v_theta, cost_func, meas_func, measurement,
+             device, num_of_samples, size,
+             N=100, M=10, xi=5e-3, alpha=10.0, **kwargs):
+    """
+    Implements Algorithm 1 from the reference text. (https://openaccess.thecvf.com/content/CVPR2023/papers/Liu_FlowGrad_Controlling_the_Output_of_Generative_ODEs_With_Gradients_CVPR_2023_paper.pdf)
+
+    Args:
+      v_theta: The pre-trained ODE velocity function.
+      N: The number of Euler discretization steps.
+      M: The number of optimization iterations.
+      lambd: Penalty coefficient.
+      xi: Threshold for non-uniform discretization.
+      alpha: Step size for gradient descent.
+
+    Returns:
+        The optimized output image x1.
+    """
+    
+    L = lambda x : cost_func(meas_func, x, measurement, **kwargs)
+    
+    x0 = torch.randn(num_of_samples, *size, device=device)
+    u = torch.zeros(N -1, *x0.shape, device=device)         # Initialize all the variables {u(k/N)}_{k=0}^{N-1} to zero.
+    ts = torch.linspace(0, 1, N, device=device)
+    dt = ts[1] - ts[0]
+    
+    pbar = tqdm(list(range(M)))
+    
+    for _ in pbar:
+        # Simulate the PF ODE trajectory
+        x = [x0]
+        v = []
+        for k, t in enumerate(ts[:-1]):
+            with torch.no_grad():  # Pause gradient calculation during simulation
+                xt = x[-1]
+                x_k_plus_1 = xt + dt * (v_theta(t, xt) + u[k])
+                x.append(x_k_plus_1)
+                v.append(v_theta(t, xt))
+
+        # Approximate with Non-uniform Discretization
+        S = []
+        for k in range(N - 1):
+            if k == 0 or k == N - 2:
+                S.append(torch.norm(v[k - 1] - v[k])**2 / torch.norm(v[k])**2)
+            else:
+                S.append(max(
+                    torch.norm(v[k - 1] - v[k])**2 / torch.norm(v[k])**2,
+                    torch.norm(v[k] - v[k + 1])**2 / torch.norm(v[k + 1])**2
+                ))
+
+        # Construct G
+        G = [0]
+        tj = 0
+        while tj < 1:
+            m = 1
+            while tj + m*dt < 1 and sum(S[int(tj/dt):int(tj/dt) + m]) < xi:
+                m += 1
+            tj = tj + m*dt
+            G.append(tj.item())
+
+        # Fast Back-propagation
+        x1 = x[-1]
+        x1 = x1.requires_grad_()
+
+        loss = L(x1)
+        pbar.set_postfix({'distance': loss.item()}, refresh=False)
+        grad_x1 = torch.autograd.grad(loss, x1)[0]
+        grad_u = []
+
+        for j in range(len(G) - 2, -1, -1):
+            def phi_j_prime(x):
+                t = ts[int(G[j]/dt)]
+                return x + (G[j + 1] - G[j]) * (v_theta(t, x) + u[int(G[j]/dt)])
+
+            _, grad_x1 = torch.autograd.functional.vjp(phi_j_prime, x[int(G[j]/dt)], grad_x1)
+            grad_u.append((G[j + 1] - G[j]) * grad_x1)
+
+        grad_u.reverse()
+
+        # Update the variables
+        for j in range(len(G) - 1):
+            for k in range(int(G[j]/dt), int(G[j + 1]/dt)):
+                u[k] = u[k] - alpha * grad_u[j]
+
+    # # Generate the final output image
+    # with torch.no_grad():
+    #     xt = x0
+    #     for t in ts[:-1]:
+    #         vk = v_theta(t, xt)
+    #         x_next = xt + dt * (vk + u[k])
+    #         xt = x_next
+            
+    return xt.detach().cpu().numpy()#xt.detach().cpu().numpy()
+
 def oc_flow(f_p, cost_fn, meas_fn, measurement,
             max_iterations, lr,
             beta, num_of_steps, size,
@@ -14,7 +107,7 @@ def oc_flow(f_p, cost_fn, meas_fn, measurement,
     Implements Algorithm 1: OC-Flow on Euclidean Space. (https://arxiv.org/pdf/2410.18070)
     """
 
-    reward_fn = lambda x: -cost_fn(meas_fn, x, measurement, **kwargs)
+    reward_fn = lambda x, x_p: -(cost_fn(meas_fn, x, measurement, **kwargs) + ((x - x_p)**2).mean())
     ts = torch.linspace(0, 1, num_of_steps, device=device)
     dt = ts[1] - ts[0]
 
@@ -31,20 +124,26 @@ def oc_flow(f_p, cost_fn, meas_fn, measurement,
             x_list = [x_prev]
             j = 0  # Index for control terms
             for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
-                x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt  
+                if i % control_update_freq == 0:
+                    x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
+                else:
+                    x_t = x_prev + f_p(t, x_prev) * dt
                 x_prev = x_t # Update x_prev for the next iteration
                 x_list.append(x_prev)
                 if (i + 1) % control_update_freq == 0:  # Update control index
                     j += 1
+            
+            if theta.sum() == 0:
+                x_p = x_list[-1].clone().detach()
                 
         # Calculate the gradient (adjoint method)
         x_prev = x_list.pop().requires_grad_()
-        grad_x_t = torch.autograd.grad(reward_fn(x_prev), x_prev, retain_graph=False)[0]
+        grad_x_t = torch.autograd.grad(reward_fn(x_prev, x_p), x_prev, retain_graph=False)[0]
         del x_prev
         grad_x = [grad_x_t]
         for t in (reversed(ts[:-1])):  # Iterate in reverse from the second element
             x_t = x_list.pop()
-            grad_x_t = torch.autograd.functional.vjp(f_p, inputs=(t, x_t), v=grad_x_t)[1][1]
+            grad_x_t = torch.autograd.functional.vjp(f_p, inputs=(t, x_t), v=grad_x_t)[1][1] ## Gradient blows up for the inpainting task
             grad_x.append(grad_x_t)
             del x_t
         # Update control (no need to store the entire grad_x)
