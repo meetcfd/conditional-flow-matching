@@ -34,9 +34,9 @@ scheduler:
   T_max: 100
   eta_min: 1e-6
 
-num_epochs: 10
+num_epochs: 100
 print_epoch_int: 1
-save_epoch_int: 1
+save_epoch_int: 20
 print_with_epoch_int: 10
-restart: False
-restart_epoch:
+restart: True
+restart_epoch: 9
