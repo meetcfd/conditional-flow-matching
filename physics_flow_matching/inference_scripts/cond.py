@@ -99,67 +99,67 @@ def flowgrad(v_theta, cost_func, meas_func, measurement,
             
     return xt.detach().cpu().numpy()#xt.detach().cpu().numpy()
 
-def oc_flow(f_p, cost_fn, meas_fn, measurement,
-            max_iterations, lr,
-            beta, num_of_steps, size,
-            device, control_update_freq=1, **kwargs):
-    """
-    Implements Algorithm 1: OC-Flow on Euclidean Space. (https://arxiv.org/pdf/2410.18070)
-    """
+# def oc_flow(f_p, cost_fn, meas_fn, measurement,
+#             max_iterations, lr,
+#             beta, num_of_steps, size,
+#             device, control_update_freq=1, **kwargs):
+#     """
+#     Implements Algorithm 1: OC-Flow on Euclidean Space. (https://arxiv.org/pdf/2410.18070)
+#     """
 
-    reward_fn = lambda x, x_p: -(cost_fn(meas_fn, x, measurement, **kwargs) + ((x - x_p)**2).mean())
-    ts = torch.linspace(0, 1, num_of_steps, device=device)
-    dt = ts[1] - ts[0]
+#     reward_fn = lambda x, x_p: -(cost_fn(meas_fn, x, measurement, **kwargs) + ((x - x_p)**2).mean())
+#     ts = torch.linspace(0, 1, num_of_steps, device=device)
+#     dt = ts[1] - ts[0]
 
-    x0 = torch.randn(1, *size, device=device) 
+#     x0 = torch.randn(1, *size, device=device) 
 
-    # Initialize control terms
-    theta = torch.zeros(num_of_steps//control_update_freq, *x0.shape, device=device)  
+#     # Initialize control terms
+#     theta = torch.zeros(num_of_steps//control_update_freq, *x0.shape, device=device)  
 
-    # Optimization loop
-    for _ in tqdm(range(max_iterations)):
-        with torch.no_grad():
-            # Solve for the state trajectory (Euler discretization)
-            x_prev = x0.clone()
-            x_list = [x_prev]
-            j = 0  # Index for control terms
-            for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
-                if i % control_update_freq == 0:
-                    x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
-                else:
-                    x_t = x_prev + f_p(t, x_prev) * dt
-                x_prev = x_t # Update x_prev for the next iteration
-                x_list.append(x_prev)
-                if (i + 1) % control_update_freq == 0:  # Update control index
-                    j += 1
+#     # Optimization loop
+#     for _ in tqdm(range(max_iterations)):
+#         with torch.no_grad():
+#             # Solve for the state trajectory (Euler discretization)
+#             x_prev = x0.clone()
+#             x_list = [x_prev]
+#             j = 0  # Index for control terms
+#             for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
+#                 if i % control_update_freq == 0:
+#                     x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
+#                 else:
+#                     x_t = x_prev + f_p(t, x_prev) * dt
+#                 x_prev = x_t # Update x_prev for the next iteration
+#                 x_list.append(x_prev)
+#                 if (i + 1) % control_update_freq == 0:  # Update control index
+#                     j += 1
             
-            if theta.sum() == 0:
-                x_p = x_list[-1].clone().detach()
+#             if theta.sum() == 0:
+#                 x_p = x_list[-1].clone().detach()
                 
-        # Calculate the gradient (adjoint method)
-        x_prev = x_list.pop().requires_grad_()
-        grad_x_t = torch.autograd.grad(reward_fn(x_prev, x_p), x_prev, retain_graph=False)[0]
-        del x_prev
-        grad_x = [grad_x_t]
-        for t in (reversed(ts[:-1])):  # Iterate in reverse from the second element
-            x_t = x_list.pop()
-            grad_x_t = torch.autograd.functional.vjp(f_p, inputs=(t, x_t), v=grad_x_t)[1][1] ## Gradient blows up for the inpainting task
-            grad_x.append(grad_x_t)
-            del x_t
-        # Update control (no need to store the entire grad_x)
-        grad_x = torch.stack(grad_x[::-1])
-        theta = beta * theta + lr * grad_x[::control_update_freq]
+#         # Calculate the gradient (adjoint method)
+#         x_prev = x_list.pop().requires_grad_()
+#         grad_x_t = torch.autograd.grad(reward_fn(x_prev, x_p), x_prev, retain_graph=False)[0]
+#         del x_prev
+#         grad_x = [grad_x_t]
+#         for t in (reversed(ts[:-1])):  # Iterate in reverse from the second element
+#             x_t = x_list.pop()
+#             grad_x_t = torch.autograd.functional.vjp(f_p, inputs=(t, x_t), v=grad_x_t)[1][1] ## Gradient blows up for the inpainting task
+#             grad_x.append(grad_x_t)
+#             del x_t
+#         # Update control (no need to store the entire grad_x)
+#         grad_x = torch.stack(grad_x[::-1])
+#         theta = beta * theta + lr * grad_x[::control_update_freq]
 
-    # Solve for the final state trajectory with optimized control
-    with torch.no_grad():
-        x_prev = x0
-        j = 0  # Index for control terms
-        for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
-            x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
-            x_prev = x_t # Update x_prev for the next iteration
-            if (i + 1) % control_update_freq == 0:  # Update control index
-                j += 1
-    return x_prev.detach().cpu().numpy()
+#     # Solve for the final state trajectory with optimized control
+#     with torch.no_grad():
+#         x_prev = x0
+#         j = 0  # Index for control terms
+#         for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
+#             x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
+#             x_prev = x_t # Update x_prev for the next iteration
+#             if (i + 1) % control_update_freq == 0:  # Update control index
+#                 j += 1
+#     return x_prev.detach().cpu().numpy()
 
 def d_flow(
     cost_func,
@@ -205,9 +205,12 @@ def d_flow(
         return loss
 
     optimizer = optimizer([initial_point], **optimizer_kwargs)
+    
+    pbar = tqdm(list(range(max_iterations)))
 
-    for _ in tqdm(range(max_iterations)):
-        optimizer.step(closure)
+    for _ in pbar:
+       loss = optimizer.step(closure)
+       pbar.set_postfix({'distance': loss.item()}, refresh=False)
 
     return (ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1]).detach().cpu().numpy()
 
@@ -361,6 +364,74 @@ def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
                     x = x_fixed + (v)*dt #
                 
                 x = x.detach()
+                      
+        samples.append(x.cpu().numpy())
+        
+    return np.concatenate(samples)
+
+def infer_gradfree_heun(fm : FlowMatcher, cfm_model : torch.nn.Module,
+                   samples_per_batch, total_samples, dims_of_img, 
+                   num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+                   device, **kwargs):
+    """https://arxiv.org/pdf/2411.07625 : gradfree based algorithm with Heun's method"""
+    
+    def heun_step(t, x, dt):
+        k1 = cfm_model(t, x)
+        if t + dt >= 1.:
+            return k1
+        k2 = cfm_model(t + dt, x + k1*dt)
+        return 0.5*(k1 + k2)
+    
+    def rk4_step(t, x, dt):
+        k1 = cfm_model(t, x)
+        if t + dt >= 1.:
+            return k1
+        k2 = cfm_model(t + 0.5*dt, x + 0.5*k1*dt)
+        k3 = cfm_model(t + 0.5*dt, x + 0.5*k2*dt)
+        k4 = cfm_model(t + dt, x + k3*dt)
+        return (k1 + 2*k2 + 2*k3 + k4)/6.
+  
+    ts = torch.linspace(0, 1, num_of_steps, device=device)
+    dt = ts[1] - ts[0]
+    
+    samples_per_batch = 1
+    
+    samples = []
+    
+    for i in range(total_samples//samples_per_batch):
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img 
+        
+        x = torch.randn(samples_size, device=device)
+        x_gauss = x.clone().detach()
+        first_step = True
+        
+        pbar = tqdm(ts[:-1])        
+        for t in pbar:
+            _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
+            beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
+                             pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
+
+            
+            x = x.requires_grad_()
+            v = rk4_step(t, x, dt)#heun_step(t, x, dt)
+            
+            if first_step:
+                first_step=False
+                x = x + v*dt
+            
+            else:
+                scaled_grad, mse_loss = grad_cost_func(meas_func, x, conditioning, 
+                                                is_grad_free=True, use_fd=False, grad_free={"a_t" : a_t, "b_t" : b_t, "x_gauss" : x_gauss},
+                                                **kwargs)
+                pbar.set_postfix({'distance': mse_loss}, refresh=False)
+                scaled_grad *=  torch.linalg.norm(v.flatten())
+                v = v - conditioning_scale*beta*scaled_grad
+                x = x + (v)*dt #
+            
+            x = x.detach()
                       
         samples.append(x.cpu().numpy())
         

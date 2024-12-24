@@ -37,4 +37,4 @@ def grad_cost_func(meas_func, x, measurement, **kwargs):
     
     grad = torch.autograd.grad(diff_norm, x)[0]
     unit_grad = grad / torch.linalg.norm(grad)
-    return unit_grad, diff_norm #torch.autograd.grad(diff_norm, x)[0], diff_norm.item() # 
+    return unit_grad, diff_norm.item() #torch.autograd.grad(diff_norm, x)[0], diff_norm.item() # 

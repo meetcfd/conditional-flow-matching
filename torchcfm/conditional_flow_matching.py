@@ -37,6 +37,129 @@ def pad_t_like_x(t, x):
         return t
     return t.reshape(-1, *([1] * (x.dim() - 1)))
 
+class RectifiedFlow:
+    def __init__(self):
+        r"""Initialize the RectfiedFlow class."""
+        pass
+    
+    def compute_mu_t(self, x0, x1, t):
+        """
+        Compute the mean of the probability path N(t * x1, (1 - t))
+
+        Parameters
+        ----------
+        x0 : Tensor, shape (bs, *dim)
+            represents the source minibatch
+        x1 : Tensor, shape (bs, *dim)
+            represents the target minibatch
+        t : FloatTensor, shape (bs)
+
+        Returns
+        -------
+        mean mu_t: t * x1
+        """
+        
+        del x0
+        t = pad_t_like_x(t, x1)
+        return t * x1
+
+    def compute_sigma_t(self, t):
+        """
+        Compute the standard deviation of the probability path N(t * x1, (1 - t))
+
+        Parameters
+        ----------
+        t : FloatTensor, shape (bs)
+
+        Returns
+        -------
+        standard deviation sigma
+        """
+        
+        return 1 - t
+
+    def sample_xt(self, x0, x1, t, epsilon):
+        """
+        Draw a sample from the probability path N(t * x1 + (1 - t) * x0, sigma), see (Eq.14) [1].
+
+        Parameters
+        ----------
+        x0 : Tensor, shape (bs, *dim)
+            represents the source minibatch
+        x1 : Tensor, shape (bs, *dim)
+            represents the target minibatch
+        t : FloatTensor, shape (bs)
+        epsilon : Tensor, shape (bs, *dim)
+            noise sample from N(0, 1)
+
+        Returns
+        -------
+        xt
+        """
+        mu_t = self.compute_mu_t(x0, x1, t)
+        sigma_t = self.compute_sigma_t(t)
+        sigma_t = pad_t_like_x(sigma_t, x1)
+        return mu_t + sigma_t * epsilon
+    
+    def compute_conditional_flow(self, epsilon, t, xt):
+        """
+        Compute the conditional vector field ut(x1|x0) = (xt - epsilon)/t
+
+        Parameters
+        ----------
+        epsilon : Tensor, shape (bs, *dim)
+            noise sample from N(0, 1)
+        t : FloatTensor, shape (bs)
+        xt : Tensor, shape (bs, *dim)
+            represents the samples drawn from probability path pt
+
+        Returns
+        -------
+        ut : conditional vector field ut(x1|x0)
+        """
+        t = pad_t_like_x(t, xt)
+        return (xt - epsilon)/t
+    
+    def sample_noise_like(self, x):
+        return torch.randn_like(x)
+    
+    def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
+        """
+        Compute the sample xt (drawn from N(t * x1, (1 - t)))
+        and the conditional vector field ut(x1|x0) = (xt - epsilon)/t
+
+        Parameters
+        ----------
+        x0 : Tensor, shape (bs, *dim)
+            represents the source minibatch
+        x1 : Tensor, shape (bs, *dim)
+            represents the target minibatch
+        (optionally) t : Tensor, shape (bs)
+            represents the time levels
+            if None, drawn from uniform [0,1]
+        return_noise : bool
+            return the noise sample epsilon
+
+        Returns
+        -------
+        t : FloatTensor, shape (bs)
+        xt : Tensor, shape (bs, *dim)
+            represents the samples drawn from probability path pt
+        ut : conditional vector field ut(x1|x0) = (xt - epsilon)/t
+        (optionally) epsilon : Tensor, shape (bs, *dim) such that xt = mu_t + sigma_t * epsilon
+        """
+        if t is None:
+            t = torch.FloatTensor(x0.shape[0]).uniform_(5e-3, 1.).type_as(x0)
+        assert len(t) == x0.shape[0], "t has to have batch size dimension"
+
+        eps = self.sample_noise_like(x0)
+        xt = self.sample_xt(x0, x1, t, eps)
+        ut = self.compute_conditional_flow(eps, t, xt)
+        if return_noise:
+            return t, xt, ut, eps
+        else:
+            return t, xt, ut
+
 class FlowMatcher:
     """Classic Flow Matching Algorithm.
 
