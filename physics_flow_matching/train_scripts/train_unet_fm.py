@@ -56,7 +56,7 @@ def main(config_path):
 
     model.to(dev)
     
-    FM = FlowMatcher(sigma=config.FM.sigma)
+    FM = FlowMatcher(sigma=config.FM.sigma, add_heavy_noise=config.FM.add_heavy_noise, nu=config.FM.nu) #FlowMatcher(sigma=config.FM.sigma)
     
     optim = Adam(model.parameters(), lr=config.optimizer.lr)
     
