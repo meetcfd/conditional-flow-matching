@@ -10,7 +10,7 @@ import warnings
 from typing import Union
 
 import torch
-
+from torch.distributions import Chi2
 from .optimal_transport import OTPlanSampler
 
 
@@ -167,9 +167,10 @@ class FlowMatcher:
     - Drawing data from gaussian probability path N(t * x1 , sigma_t) function
     - conditional flow matching ut(x1|x0) = t * x1
     - score function $\nabla log p_t(x|x0, x1)$
+    - add option for heavy tailed noise in the samples
     """
 
-    def __init__(self, sigma: Union[float, int] = 0.0):
+    def __init__(self, sigma: Union[float, int] = 0.0, add_heavy_noise=False, **kwargs):
         r"""Initialize the ConditionalFlowMatcher class. It requires the hyper-parameter $\sigma$.
 
         Parameters
@@ -177,7 +178,15 @@ class FlowMatcher:
         sigma : Union[float, int]
         """
         self.sigma = sigma
-
+        if add_heavy_noise:
+            self.nu = kwargs.get("nu", torch.inf)
+            self.heavy_noise = add_heavy_noise
+            if self.nu == torch.inf:
+                print("Heavy noise is set to True but nu is set to infinity. Falling back to normal noise.")
+                self.heavy_noise = False
+            else:
+                self.chi2 = Chi2(self.nu)
+                                
     def compute_mu_t(self, x0, x1, t):
         """
         Compute the mean of the probability path N(t * x1 + (1 - t) * x0, sigma), see (Eq.14) [1].
@@ -274,6 +283,10 @@ class FlowMatcher:
         return (dsigma_t/sigma_t) * (xt - self.compute_mu_t(x0,x1,t)) + x1
 
     def sample_noise_like(self, x):
+        if self.heavy_noise:
+            z = torch.randn_like(x)
+            kappa = self.chi2.sample().to(x.device)/self.nu
+            return z / torch.sqrt(kappa)
         return torch.randn_like(x)
 
     def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
