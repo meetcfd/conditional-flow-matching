@@ -285,7 +285,8 @@ class FlowMatcher:
     def sample_noise_like(self, x):
         if self.heavy_noise:
             z = torch.randn_like(x)
-            kappa = self.chi2.sample().to(x.device)/self.nu
+            kappa = self.chi2.sample((x.shape[0],)).to(x.device)/self.nu
+            kappa = pad_t_like_x(kappa, x)
             return z / torch.sqrt(kappa)
         return torch.randn_like(x)
 
