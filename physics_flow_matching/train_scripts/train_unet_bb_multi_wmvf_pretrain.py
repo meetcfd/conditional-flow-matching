@@ -45,7 +45,8 @@ def main(config_path):
                                         cutoff=config.dataloader.cutoff,
                                         patch_dims=config.dataloader.patch_dims,
                                         dataset_=DATASETS[config.dataloader.dataset],
-                                        jump=config.dataloader.jump)
+                                        jump=config.dataloader.jump,
+                                        scale_inputs=config.dataloader.scale_inputs)
         
     model = UNetModel(dim=config.unet.dim,
                       out_channels=config.unet.out_channels,

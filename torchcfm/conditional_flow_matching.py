@@ -339,7 +339,7 @@ class FlowMatcher:
         da_t = 1
         db_t = self.sigma - 1
         lmbda = db_t/b_t
-        beta = a_t*(da_t - db_t/b_t * a_t)
+        beta = a_t*(da_t - lmbda * a_t)
         return lmbda, beta, a_t, b_t
     
 class ConditionalFlowMatcher:

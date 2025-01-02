@@ -67,7 +67,7 @@ def quickload(fp, csize):
 
 #     return train_dataloader, test_dataloader
 
-def get_loaders_wmvf(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, wall_norm_dict, dataset_):
+def get_loaders_wmvf(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, wall_norm_dict, dataset_, scale_inputs=False):
     
     def norm(d, m, s):
         return (d-m)/s
@@ -115,7 +115,7 @@ def get_loaders_wmvf_multi(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
 
     return train_dataloader, test_dataloader
 
-def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, patch_dims, dataset_, jump=1):
+def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, patch_dims, dataset_, jump=1, scale_inputs=False):
     
     def norm(d, m, s):
         return (d-m)/s
@@ -148,7 +148,11 @@ def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
     
     data = np.concatenate([wm_data, vf_data], axis=1)
     m, s = np.mean(data, axis=(0,3,4), keepdims=True), np.std(data, axis=(0,3,4), keepdims=True)
-    
+    # scaling v and w velocity components with u velocity component (Guastoni et al. 2021)
+    if scale_inputs:
+        for i in range(1,3):
+            data[:, 1, i] = data[:, 1, i] * s[:, 1, 0]/s[:, 1, i]
+            s[:, 1, i] = s[:, 1, 0]
     data = norm(data, m, s)
 
     train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump], patch_dims, cutoff), batch_size=batch_size, shuffle=True)

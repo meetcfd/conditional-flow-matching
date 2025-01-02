@@ -1,4 +1,5 @@
 import torch 
+from torch.distributions.chi2 import Chi2
 
 def inpainting(x_hat, **kwargs):
     slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"]),
@@ -38,3 +39,19 @@ def grad_cost_func(meas_func, x, measurement, **kwargs):
     grad = torch.autograd.grad(diff_norm, x)[0]
     unit_grad = grad / torch.linalg.norm(grad)
     return unit_grad, diff_norm.item() #torch.autograd.grad(diff_norm, x)[0], diff_norm.item() # 
+
+def sample_noise(samples_size, dims_of_img, use_heavy_noise, device, **kwargs):
+    if not use_heavy_noise:
+        y0 = torch.randn(samples_size, device=device)
+    else:
+        assert kwargs["nu"] is not None, "provide a value for nu when using heavy noise"
+        nu = kwargs["nu"]
+        chi2 = Chi2(torch.tensor([nu]))
+        
+        z = torch.randn(samples_size, device=device)
+        kappa = chi2.sample((z.shape[0],)).to(z.device)/nu
+        for _ in range(len(dims_of_img)-1):
+            kappa = kappa[..., None]
+        y0 = z/torch.sqrt(kappa)
+        
+    return y0
