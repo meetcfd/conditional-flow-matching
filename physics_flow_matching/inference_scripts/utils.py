@@ -1,5 +1,6 @@
 import torch 
 from torch.distributions.chi2 import Chi2
+from torch.nn.functional import interpolate
 
 def inpainting(x_hat, **kwargs):
     slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"]),
@@ -12,6 +13,14 @@ def wall_pres_forward(x_hat, **kwargs):
     slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"])
     x_pred = det_model(x_hat)
     return x_pred[..., c:c+1, slice_x, slice_y]*kwargs["meas_std"][:, c:c+1] + kwargs["meas_mean"][:, c:c+1]
+
+def coarse_wall_pres_forward(x_hat, **kwargs):
+    det_model = kwargs['model']
+    # std, mean = kwargs["meas_std"], kwargs["meas_mean"]
+    size = kwargs["size"]
+    mode = kwargs["mode"] if "mode" in kwargs else "nearest"
+    x_pred = det_model(x_hat)#*std + mean
+    return interpolate(x_pred, size=size, mode=mode)
 
 def cost_func(meas_func, x_hat, measurement, **kwargs):
     pred_measurement = meas_func(x_hat, **kwargs)
