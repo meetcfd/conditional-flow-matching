@@ -49,6 +49,7 @@ def main(config_path):
                                         scale_inputs=config.dataloader.scale_inputs)
         
     model = UNetModel(dim=config.unet.dim,
+                      channel_mult=config.unet.channel_mult,
                       out_channels=config.unet.out_channels,
                       num_channels=config.unet.num_channels,
                       num_res_blocks=config.unet.res_blocks,

@@ -45,6 +45,7 @@ def main(config_path):
                                         jump=config.dataloader.jump)
         
     model = UNetModel(dim=config.unet.dim,
+                      channel_mult=config.unet.channel_mult,
                       num_channels=config.unet.num_channels,
                       num_res_blocks=config.unet.res_blocks,
                       num_head_channels=config.unet.head_chans,
@@ -56,7 +57,7 @@ def main(config_path):
 
     model.to(dev)
     
-    FM = RectifiedFlow()
+    FM = RectifiedFlow(add_heavy_noise=config.FM.add_heavy_noise, nu=config.FM.nu)
     
     optim = Adam(model.parameters(), lr=config.optimizer.lr)
     

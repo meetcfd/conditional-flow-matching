@@ -615,7 +615,7 @@ class UNetModelWrapper(UNetModel):
             else:
                 raise ValueError(f"unsupported image size: {image_size}")
         else:
-            channel_mult = list(channel_mult)
+            channel_mult = tuple(map(int, channel_mult.split(', ')))
 
         attention_ds = []
         for res in attention_resolutions.split(","):

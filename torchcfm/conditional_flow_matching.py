@@ -38,9 +38,16 @@ def pad_t_like_x(t, x):
     return t.reshape(-1, *([1] * (x.dim() - 1)))
 
 class RectifiedFlow:
-    def __init__(self):
+    def __init__(self, add_heavy_noise=False, **kwargs):
         r"""Initialize the RectfiedFlow class."""
-        pass
+        if add_heavy_noise:
+            self.nu = kwargs.get("nu", torch.inf)
+            self.heavy_noise = add_heavy_noise
+            if self.nu == torch.inf:
+                print("Heavy noise is set to True but nu is set to infinity. Falling back to normal noise.")
+                self.heavy_noise = False
+            else:
+                self.chi2 = Chi2(self.nu)
     
     def compute_mu_t(self, x0, x1, t):
         """
@@ -121,8 +128,13 @@ class RectifiedFlow:
         return (xt - epsilon)/t
     
     def sample_noise_like(self, x):
+        if self.heavy_noise:
+            z = torch.randn_like(x)
+            kappa = self.chi2.sample((x.shape[0],)).to(x.device)/self.nu
+            kappa = pad_t_like_x(kappa, x)
+            return z / torch.sqrt(kappa)
         return torch.randn_like(x)
-    
+        
     def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
         """
         Compute the sample xt (drawn from N(t * x1, (1 - t)))
