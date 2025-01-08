@@ -171,6 +171,16 @@ class RectifiedFlow:
             return t, xt, ut, eps
         else:
             return t, xt, ut
+        
+    def compute_lambda_and_beta(self, t):
+        """https://arxiv.org/pdf/2411.07625"""
+        b_t = self.compute_sigma_t(t)
+        a_t = t
+        da_t = 1
+        db_t = - 1
+        lmbda = db_t/b_t
+        beta = a_t*(da_t - lmbda * a_t)
+        return lmbda, beta, a_t, b_t
 
 class FlowMatcher:
     """Classic Flow Matching Algorithm.

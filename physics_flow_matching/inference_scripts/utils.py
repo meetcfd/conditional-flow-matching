@@ -51,7 +51,7 @@ def grad_cost_func(meas_func, x, measurement, **kwargs):
 
 def sample_noise(samples_size, dims_of_img, use_heavy_noise, device, **kwargs):
     if not use_heavy_noise:
-        y0 = torch.randn(samples_size, device=device)
+        return torch.randn(samples_size, device=device)
     else:
         assert kwargs["nu"] is not None, "provide a value for nu when using heavy noise"
         nu = kwargs["nu"]
@@ -61,6 +61,4 @@ def sample_noise(samples_size, dims_of_img, use_heavy_noise, device, **kwargs):
         kappa = chi2.sample((z.shape[0],)).to(z.device)/nu
         for _ in range(len(dims_of_img)-1):
             kappa = kappa[..., None]
-        y0 = z/torch.sqrt(kappa)
-        
-    return y0
+        return z/torch.sqrt(kappa)

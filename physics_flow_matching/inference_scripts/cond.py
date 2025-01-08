@@ -217,59 +217,12 @@ def d_flow(
 def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
                 samples_per_batch, total_samples, dims_of_img, 
                 num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
-                device, refine, **kwargs):
+                device, refine, sample_noise, use_heavy_noise, rf_start, **kwargs):
     """https://arxiv.org/pdf/2411.07625 : grad based algorithm"""
     
     # torch.manual_seed(seed=42)
-    ts = torch.linspace(0, 1, num_of_steps, device=device)
-    dt = ts[1] - ts[0]
-    
-    samples_per_batch = 1
-    
-    samples = []
-    
-    for i in range(total_samples//samples_per_batch):
-        samples_size = samples_per_batch
-        if i == total_samples//samples_per_batch - 1:
-            samples_size = samples_per_batch + total_samples%samples_per_batch
-        samples_size = (samples_size,) + dims_of_img 
-        
-        x = torch.randn(samples_size, device=device)
-        
-        for t in tqdm(ts[:-1]):
-            _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
-            beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
-                             pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
-             
-            x_fixed = x.clone().detach()
-                           
-            for _ in range(refine): ##Picard Iteration
-                x = x.requires_grad_()
-                v = cfm_model(t, x)
-                
-                scaled_grad, _ = grad_cost_func(meas_func, x, conditioning, 
-                                                is_grad_free=False, grad={"t" : t, "v" : v},
-                                                **kwargs)
-                scaled_grad *= torch.linalg.norm(v.flatten())
-                
-                v = v - conditioning_scale*beta*scaled_grad
-                x = x_fixed + v*dt #x + (v)*dt 
-                
-                x = x.detach()
-        
-        samples.append(x.cpu().numpy())
-        
-    return np.concatenate(samples)
-    
-
-def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
-                   samples_per_batch, total_samples, dims_of_img, 
-                   num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
-                   sample_noise, use_heavy_noise,
-                   device, refine, **kwargs):
-    """https://arxiv.org/pdf/2411.07625 : gradfree based algorithm"""
-  
-    ts = torch.linspace(0, 1, num_of_steps, device=device)
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
     dt = ts[1] - ts[0]
     
     samples_per_batch = 1
@@ -283,6 +236,58 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
         samples_size = (samples_size,) + dims_of_img 
         
         x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
+        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
+        pbar = tqdm(ts[:-1])        
+        for t in pbar:
+            _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
+            beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
+                             pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
+             
+            x_fixed = x.clone().detach()
+                           
+            for _ in range(refine): ##Picard Iteration
+                x = x.requires_grad_()
+                v = cfm_model(t, x)
+                
+                scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
+                                                is_grad_free=False, grad={"t" : t, "v" : v},
+                                                **kwargs)
+                scaled_grad *= torch.linalg.norm(v.flatten())
+                pbar.set_postfix({'distance': loss}, refresh=False)
+
+                v = v - conditioning_scale*scaled_grad #beta
+                x = x_fixed + v*dt #x + (v)*dt 
+                
+                x = x.detach()
+        
+        samples.append(x.cpu().numpy())
+        
+    return np.concatenate(samples)
+    
+
+def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
+                   samples_per_batch, total_samples, dims_of_img, 
+                   num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+                   sample_noise, use_heavy_noise, rf_start,
+                   device, refine, **kwargs):
+    """https://arxiv.org/pdf/2411.07625 : gradfree based algorithm"""
+  
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
+    dt = ts[1] - ts[0]
+    
+    samples_per_batch = 1
+    
+    samples = []
+    
+    for i in range(total_samples//samples_per_batch):
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img 
+        
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
+        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
         x_gauss = x.clone().detach()
         first_step = True
         
@@ -302,15 +307,16 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
                 if first_step:
                     first_step=False
                     x = x + v*dt
+                    x = x.detach()
                     break
                 
                 else:
-                    scaled_grad, loss = grad_cost_func(meas_func, x, conditioning, 
+                    scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
                                                     is_grad_free=True, use_fd=False, grad_free={"a_t" : a_t, "b_t" : b_t, "x_gauss" : x_gauss},
                                                     **kwargs)
                     pbar.set_postfix({'distance': loss}, refresh=False)
                     scaled_grad *=  torch.linalg.norm(v.flatten())
-                    v = v - conditioning_scale*beta*scaled_grad
+                    v = v - conditioning_scale*scaled_grad #beta
                     x = x_fixed + (v)*dt #
                 
                 x = x.detach()
@@ -322,10 +328,12 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
 def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
                    samples_per_batch, total_samples, dims_of_img, 
                    num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+                   sample_noise, use_heavy_noise, rf_start,
                    device, refine, **kwargs):
     """Use finite difference to approx the u(t,x)"""
   
-    ts = torch.linspace(0, 1, num_of_steps, device=device)
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
     dt = ts[1] - ts[0]
     
     samples_per_batch = 1
@@ -338,10 +346,12 @@ def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
             samples_size = samples_per_batch + total_samples%samples_per_batch
         samples_size = (samples_size,) + dims_of_img 
         
-        x = torch.randn(samples_size, device=device)
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
+        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
         first_step = True
-                
-        for t in tqdm(ts[:-1]):
+        
+        pbar = tqdm(ts[:-1])        
+        for t in pbar:
             _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
             beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
                              pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
@@ -356,27 +366,32 @@ def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
                 if first_step:
                     first_step=False
                     x = x + v*dt
+                    x = x.detach()
+                    x_prev = x_fixed.clone().detach()
                     break
                 
                 else:
-                    scaled_grad, _ = grad_cost_func(meas_func, x, conditioning, 
-                                                    is_grad_free=True, use_fd=True, grad_free={"x_prev" : x_fixed, "dt": dt, "t" : t},
+                    scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
+                                                    is_grad_free=True, use_fd=True, grad_free={"x_prev" : x_prev, "dt": dt, "t" : t},
                                                     **kwargs)
+                    pbar.set_postfix({'distance': loss}, refresh=False)
                     scaled_grad *=  torch.linalg.norm(v.flatten())
-                    v = v - conditioning_scale*beta*scaled_grad
+                    v = v - conditioning_scale*scaled_grad #beta
                     x = x_fixed + (v)*dt #
                 
                 x = x.detach()
-                      
+                x_prev = x_fixed.clone().detach()
+                     
         samples.append(x.cpu().numpy())
         
     return np.concatenate(samples)
 
-def infer_gradfree_heun(fm : FlowMatcher, cfm_model : torch.nn.Module,
+def infer_gradfree_ho(fm : FlowMatcher, cfm_model : torch.nn.Module,
                    samples_per_batch, total_samples, dims_of_img, 
                    num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+                   sample_noise, use_heavy_noise, rf_start,
                    device, **kwargs):
-    """https://arxiv.org/pdf/2411.07625 : gradfree based algorithm with Heun's method"""
+    """https://arxiv.org/pdf/2411.07625 : gradfree based algorithm with higher order method like Heun's, RK4 method"""
     
     def heun_step(t, x, dt):
         k1 = cfm_model(t, x)
@@ -394,7 +409,8 @@ def infer_gradfree_heun(fm : FlowMatcher, cfm_model : torch.nn.Module,
         k4 = cfm_model(t + dt, x + k3*dt)
         return (k1 + 2*k2 + 2*k3 + k4)/6.
   
-    ts = torch.linspace(0, 1, num_of_steps, device=device)
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
     dt = ts[1] - ts[0]
     
     samples_per_batch = 1
@@ -407,7 +423,8 @@ def infer_gradfree_heun(fm : FlowMatcher, cfm_model : torch.nn.Module,
             samples_size = samples_per_batch + total_samples%samples_per_batch
         samples_size = (samples_size,) + dims_of_img 
         
-        x = torch.randn(samples_size, device=device)
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
+        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
         x_gauss = x.clone().detach()
         first_step = True
         
@@ -426,12 +443,12 @@ def infer_gradfree_heun(fm : FlowMatcher, cfm_model : torch.nn.Module,
                 x = x + v*dt
             
             else:
-                scaled_grad, mse_loss = grad_cost_func(meas_func, x, conditioning, 
+                scaled_grad, mse_loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
                                                 is_grad_free=True, use_fd=False, grad_free={"a_t" : a_t, "b_t" : b_t, "x_gauss" : x_gauss},
                                                 **kwargs)
                 pbar.set_postfix({'distance': mse_loss}, refresh=False)
                 scaled_grad *=  torch.linalg.norm(v.flatten())
-                v = v - conditioning_scale*beta*scaled_grad
+                v = v - conditioning_scale*scaled_grad #beta
                 x = x + (v)*dt #
             
             x = x.detach()
