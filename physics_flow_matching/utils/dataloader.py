@@ -118,8 +118,12 @@ def get_loaders_wmvf_multi(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
 def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, patch_dims, dataset_, jump=1, scale_inputs=False):
     
     def norm(d, m, s):
-        return (d-m)/s
-    
+        if not scale_inputs:
+            return (d-m)/s
+        else: # only scale the outputs
+            d[:, 0] = (d[:, 0] - m[:, 0])/s[:, 0]
+            return d
+        
     wm_data = []
     for pxy_path in wm_paths:
         pxy_data = []    
@@ -250,12 +254,25 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1):
         return (d-m)/s
 
     data = []
-    for path in vf_paths:
-        d = np.load(path)
-        data.append(d)   
+    
+    if len(vf_paths) == 3 and type(vf_paths[0]) == np.ndarray:
+        vf_paths = vf_paths[0]
+        for path in vf_paths:
+            d = np.load(path)
+            data.append(d)   
 
-    data = np.concatenate(data, axis=1)
-    m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
+        data = np.concatenate(data, axis=1)
+        m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
+    else:
+        for uvw_path in vf_paths:
+            uvw_data = []    
+            for path in uvw_path:
+                d = np.load(path)
+                uvw_data.append(d)   
+            data.append(uvw_data)
+        data = [np.concatenate(uvw, axis=1) for uvw in data]
+        data = np.stack(data, axis=1)
+        m, s = np.mean(data, axis=(0,3,4), keepdims=True), np.std(data, axis=(0,3,4), keepdims=True)
     
     data = norm(data, m, s)
 

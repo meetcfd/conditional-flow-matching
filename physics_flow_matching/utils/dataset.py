@@ -6,17 +6,30 @@ class VF_FM(Dataset):
     def __init__(self, data) -> None:
         super().__init__()
         self._preprocess(data, 'data')
-        self.shape = self.data.shape[1:]
+        if self.data.ndim == 4:
+            self.shape = self.data.shape[1:]
+            self.one_yp = True
+        else:
+            self.shape = self.data.shape[2:]
+            self.num_yp = self.data.shape[1]
+            self.one_yp = False
                 
     def _preprocess(self, data, name):
         setattr(self, name, (data).astype(np.float32))
                
-    def __len__(self):  
-        return self.data.shape[0]
+    def __len__(self):
+        if self.one_yp:  
+            return self.data.shape[0]
+        else:
+            return self.data.shape[0]*self.data.shape[1]
     
     def __getitem__(self, index):
-        return  np.empty(self.shape, dtype=np.float32), self.data[index]
-    
+        if self.one_yp:
+            return  np.empty(self.shape, dtype=np.float32), self.data[index]
+        else:
+            yp_ind = index % self.num_yp
+            batch = index // self.num_yp
+            return np.empty(self.shape, dtype=np.float32), self.data[batch, yp_ind], yp_ind
 # class Wallpres(Dataset):
 #     def __init__(self, data, mean, std) -> None:
 #         super().__init__()

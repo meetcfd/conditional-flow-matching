@@ -52,7 +52,9 @@ def main(config_path):
                       attention_resolutions=config.unet.attn_res,
                       dropout=config.unet.dropout,
                       use_new_attention_order=config.unet.new_attn,
-                      use_scale_shift_norm=config.unet.film
+                      use_scale_shift_norm=config.unet.film,
+                      class_cond= config.unet.class_cond if hasattr(config.unet, 'class_cond') else False,
+                      num_classes=config.unet.num_classes if hasattr(config.unet, 'num_classes') else None
                       )
 
     model.to(dev)
@@ -80,7 +82,8 @@ def main(config_path):
                 device=dev,
                 restart=config.restart,
                 return_noise=config.FM.return_noise,
-                restart_epoch=config.restart_epoch)
+                restart_epoch=config.restart_epoch,
+                class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False)
 
 if __name__ == '__main__':
     main(sys.argv[1])

@@ -2,6 +2,7 @@
 
 # Author: Alex Tong
 #         Kilian Fatras
+#         Meet Parikh
 #         +++
 # License: MIT License
 
@@ -40,6 +41,7 @@ def pad_t_like_x(t, x):
 class RectifiedFlow:
     def __init__(self, add_heavy_noise=False, **kwargs):
         r"""Initialize the RectfiedFlow class."""
+        self.heavy_noise = False
         if add_heavy_noise:
             self.nu = kwargs.get("nu", torch.inf)
             self.heavy_noise = add_heavy_noise
@@ -200,6 +202,7 @@ class FlowMatcher:
         sigma : Union[float, int]
         """
         self.sigma = sigma
+        self.heavy_noise = False
         if add_heavy_noise:
             self.nu = kwargs.get("nu", torch.inf)
             self.heavy_noise = add_heavy_noise
