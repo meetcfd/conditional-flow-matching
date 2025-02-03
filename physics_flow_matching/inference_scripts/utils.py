@@ -10,12 +10,14 @@ def inpainting(x_hat, **kwargs):
 def wall_pres_forward(x_hat, **kwargs):
     c = kwargs['channel']
     det_model = kwargs['model']
+    if hasattr(det_model, "sample") : det_model.sample()
     slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"])
     x_pred = det_model(x_hat)
     return x_pred[..., c:c+1, slice_x, slice_y]*kwargs["meas_std"][:, c:c+1] + kwargs["meas_mean"][:, c:c+1]
 
 def coarse_wall_pres_forward(x_hat, **kwargs):
     det_model = kwargs['model']
+    if hasattr(det_model, "sample") : det_model.sample()
     # std, mean = kwargs["meas_std"], kwargs["meas_mean"]
     size = kwargs["size"]
     mode = kwargs["mode"] if "mode" in kwargs else "nearest"
