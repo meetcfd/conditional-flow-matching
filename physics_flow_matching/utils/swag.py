@@ -27,8 +27,8 @@ class SWAG(nn.Module):
         self.mean = (self.mean * ((num_collected - 1) / num_collected)) + (flat_params / num_collected)
         self.square_mean = (self.square_mean * ((num_collected - 1) / num_collected)) + (flat_params.pow(2) / num_collected)
 
-        if self.rank.item() >= self.max_rank:
-            self.cov_mat_sqrt = self.cov_mat_sqrt[1:]
+        #if self.rank.item() >= self.max_rank:
+        self.cov_mat_sqrt = self.cov_mat_sqrt[1:]
         self.cov_mat_sqrt = torch.cat((self.cov_mat_sqrt, (flat_params - self.mean).unsqueeze(0)), dim=0)
         self.rank = torch.clamp(self.rank + 1, max=self.max_rank)
         self.num_collected_models += 1

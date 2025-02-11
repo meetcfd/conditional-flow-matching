@@ -164,6 +164,55 @@ def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
 
     return train_dataloader, test_dataloader
 
+def get_loaders_wmvf_baseline(wm_paths, vf_paths, batch_size, time_cutoff, dataset_, jump=1, scale_inputs=False):
+    
+    def norm(d, m, s):
+        if not scale_inputs:
+            return (d-m)/s
+        else: # only scale the outputs
+            d[:, 0] = (d[:, 0] - m[:, 0])/s[:, 0]
+            return d
+        
+    wm_data = []
+    for pxy_path in wm_paths:
+        pxy_data = []    
+        for path in pxy_path:
+            d = np.load(path)
+            pxy_data.append(d)   
+        wm_data.append(pxy_data)
+    if len(wm_data) == 1:    
+        wm_data = np.concat(wm_data[0], axis=1)[:, None]
+    else:
+        wm_data = [np.concat(wm, axis=1) for wm in wm_data]
+        wm_data = np.stack(wm_data, axis=1)
+    
+    vf_data = []  
+    for uvw_path in vf_paths:
+        uvw_data = []    
+        for path in uvw_path:
+            d = np.load(path)
+            uvw_data.append(d)   
+        vf_data.append(uvw_data)
+    if len(vf_data) == 1:
+        vf_data = np.concat(vf_data[0], axis=1)[:, None]
+    else:
+        vf_data = [np.concat(vf, axis=1) for vf in vf_data]
+        vf_data = np.stack(vf_data, axis=1)
+    
+    data = np.concatenate([wm_data, vf_data], axis=1)
+    m, s = np.mean(data, axis=(0,3,4), keepdims=True), np.std(data, axis=(0,3,4), keepdims=True)
+    # scaling v and w velocity components with u velocity component (Guastoni et al. 2021)
+    if scale_inputs:
+        for i in range(1,3):
+            data[:, 1, i] = data[:, 1, i] * s[:, 1, 0]/s[:, 1, i]
+            s[:, 1, i] = s[:, 1, 0]
+    data = norm(data, m, s)
+
+    train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump]), batch_size=batch_size, shuffle=True)
+    test_dataloader = DataLoader(dataset_(data[-1000:]), batch_size=batch_size, shuffle=True)
+
+    return train_dataloader, test_dataloader
+
 # def get_loaders_wsvf(ws_u_path, vf_path, batch_size, cutoff, wall_norm_dict, dataset_):
     
 #     def norm(d, m, s):

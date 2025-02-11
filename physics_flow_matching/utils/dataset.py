@@ -199,6 +199,20 @@ class WMVF_P(Dataset):
         patch_x, patch_y = (slice(start_index, start_index+patch_dim) for start_index, patch_dim in zip(start_indices,self.patch_dims))
         return self.data[index, 1, ..., patch_x, patch_y], self.data[index, 0, ..., patch_x, patch_y]
     
+class WMVF_baseline(Dataset):
+    def __init__(self, data) -> None:
+        super().__init__()
+        self._preprocess(data, 'data')
+        
+    def _preprocess(self, data, name):
+        setattr(self, name, (data).astype(np.float32))
+               
+    def __len__(self):  
+        return self.data.shape[0]
+    
+    def __getitem__(self, index):
+        return self.data[index, 0], self.data[index, 1]
+    
 # class WSVF(Dataset):
 #     def __init__(self, ws_u, vel_y,
 #                  wall_norm_dict, cutoff=160) -> None:
@@ -363,6 +377,7 @@ class WMAR_rollout(Dataset):
 DATASETS = {"WP":None,"KS":None, "WPWS":None, "WPWS_DD":None,
             "VF_FM":VF_FM,
             "WMVF":None, "WMVF_M": None, "WMVF_P": WMVF_P,
+            "WMVF_baseline":WMVF_baseline,
             "WSVF":None,
             "VFVF":VFVF, "VFVF_P":VFVF_patchify,
             "VFVF_P2": VFVF_patchify_2,

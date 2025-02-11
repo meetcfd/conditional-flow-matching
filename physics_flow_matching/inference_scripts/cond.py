@@ -235,6 +235,9 @@ def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
             samples_size = samples_per_batch + total_samples%samples_per_batch
         samples_size = (samples_size,) + dims_of_img 
         
+        if kwargs["swag"]:
+            kwargs["model"].sample()
+
         x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
         conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
         pbar = tqdm(ts[:-1])        
