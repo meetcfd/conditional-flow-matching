@@ -46,11 +46,11 @@ def main(config_path):
                                         jump=config.dataloader.jump,
                                         scale_inputs=config.dataloader.scale_inputs)
         
-    model = FCN()
+    model = FCN(config.model.pad_size) #
 
     model.to(dev)
     
-    optim = Adam(model.parameters(), lr=config.optimizer.lr)
+    optim = Adam(model.parameters(), lr=config.optimizer.lr, eps=config.optimizer.eps)
     
     sched =  None#CosineAnnealingLR(optim, config.scheduler.T_max, config.scheduler.eta_min)
     

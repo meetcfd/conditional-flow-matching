@@ -30,12 +30,12 @@ class FCN_outblock(nn.Module):
         super(FCN_outblock, self).__init__()
         self.conv = nn.Conv2d(in_channels=in_channels, out_channels=1,
                               kernel_size=kernel_size, padding=padding)
-        self.thres_relu = Thresholded_ReLU(threshold)
-    
+        self.thres_relu = nn.Identity() #Thresholded_ReLU(threshold) # Does not make sense, no reason to threshold the output, used for y5/exp1 
+
     def forward(self, x):
         x = self.conv(x)
         x = self.thres_relu(x)
-        return x # TODO : add cropping based on output size : not required for (320, 200) 
+        return x # TODO : add cropping based on output size : not required for pad size 15 
         
 class FCN(nn.Module):
     
@@ -61,10 +61,12 @@ class FCN(nn.Module):
         out2 = self.out_net_2(x)
         out3 = self.out_net_3(x)
         
-        return th.concat([out1, out2, out3], dim=1)
+        # return th.concat([out1, out2, out3], dim=1) # used for y5/exp{2,3}
+        out = th.concat([out1, out2, out3], dim=1)
+        return out[..., 1:-1, 1:-1] # added for pad size 16 and used for y5/exp4
     
 if __name__ == "__main__":
     inp = th.randn(1, 3, 320, 200)
-    net = FCN(pad_size=15) #15
+    net = FCN(pad_size=16) #15
     out = net(inp)
     print(out.shape)
