@@ -7,21 +7,22 @@ def inpainting(x_hat, **kwargs):
     # mask = kwargs["mask"]
     return x_hat[..., slice_x, slice_y]#x_hat * mask ## both ways of conditioning works
 
-def wall_pres_forward(x_hat, **kwargs):
-    c = kwargs['channel']
-    det_model = kwargs['model']
-    # if hasattr(det_model, "sample") : det_model.sample()
-    slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"])
+def partial_wall_pres_forward(x_hat, **kwargs):
+    det_model = kwargs["model"]
     x_pred = det_model(x_hat)
-    return x_pred[..., c:c+1, slice_x, slice_y]*kwargs["meas_std"][:, c:c+1] + kwargs["meas_mean"][:, c:c+1]
-
+    if "mask" not in kwargs.keys(): 
+        slice_c = slice(kwargs["sc"], kwargs["se"])
+        slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"])
+        return x_pred[..., slice_c, slice_x, slice_y]
+    else :
+        mask = kwargs["mask"]
+        return x_pred * mask
+    
 def coarse_wall_pres_forward(x_hat, **kwargs):
-    det_model = kwargs['model']
-    # if hasattr(det_model, "sample") : det_model.sample()
-    # std, mean = kwargs["meas_std"], kwargs["meas_mean"]
+    det_model = kwargs["model"]
     size = kwargs["size"]
-    mode = kwargs["mode"] if "mode" in kwargs else "nearest"
-    x_pred = det_model(x_hat)#*std + mean
+    mode = kwargs["mode"] if "mode" in kwargs.keys() else "nearest"
+    x_pred = det_model(x_hat)
     return interpolate(x_pred, size=size, mode=mode)
 
 def cost_func(meas_func, x_hat, measurement, **kwargs):
@@ -64,3 +65,6 @@ def sample_noise(samples_size, dims_of_img, use_heavy_noise, device, **kwargs):
         for _ in range(len(dims_of_img)-1):
             kappa = kappa[..., None]
         return z/torch.sqrt(kappa)
+    
+MEAS_MODELS = {"inpainting": inpainting, "partial_wall_pres_forward": partial_wall_pres_forward,
+               "coarse_wall_pres_forward": coarse_wall_pres_forward}

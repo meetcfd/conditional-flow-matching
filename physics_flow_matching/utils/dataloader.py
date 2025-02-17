@@ -164,7 +164,7 @@ def get_loaders_wmvf_patch(wm_paths, vf_paths, batch_size, time_cutoff, cutoff, 
 
     return train_dataloader, test_dataloader
 
-def get_loaders_wmvf_baseline(wm_paths, vf_paths, batch_size, time_cutoff, dataset_, jump=1, scale_inputs=False):
+def get_loaders_wmvf_baseline(wm_paths, vf_paths, batch_size, time_cutoff, dataset_, jump=1, scale_inputs=False, wm_vf=True):
     
     def norm(d, m, s):
         if not scale_inputs:
@@ -208,8 +208,8 @@ def get_loaders_wmvf_baseline(wm_paths, vf_paths, batch_size, time_cutoff, datas
             s[:, 1, i] = s[:, 1, 0]
     data = norm(data, m, s)
 
-    train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump]), batch_size=batch_size, shuffle=True)
-    test_dataloader = DataLoader(dataset_(data[-1000:]), batch_size=batch_size, shuffle=True)
+    train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump], wm_vf), batch_size=batch_size, shuffle=True)
+    test_dataloader = DataLoader(dataset_(data[-1000:], wm_vf), batch_size=batch_size, shuffle=True)
 
     return train_dataloader, test_dataloader
 

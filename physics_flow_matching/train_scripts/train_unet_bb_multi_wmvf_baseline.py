@@ -44,13 +44,14 @@ def main(config_path):
                                         time_cutoff=config.dataloader.time_cutoff,
                                         dataset_=DATASETS[config.dataloader.dataset],
                                         jump=config.dataloader.jump,
-                                        scale_inputs=config.dataloader.scale_inputs)
+                                        scale_inputs=config.dataloader.scale_inputs,
+                                        wm_vf=config.dataloader.wm_vf)
         
     model = FCN(config.model.pad_size) #
 
     model.to(dev)
     
-    optim = Adam(model.parameters(), lr=config.optimizer.lr, eps=config.optimizer.eps)
+    optim = Adam(model.parameters(), lr=config.optimizer.lr) # eps=config.optimizer.eps
     
     sched =  None#CosineAnnealingLR(optim, config.scheduler.T_max, config.scheduler.eta_min)
     

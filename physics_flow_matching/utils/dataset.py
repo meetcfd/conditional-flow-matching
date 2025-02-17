@@ -200,9 +200,10 @@ class WMVF_P(Dataset):
         return self.data[index, 1, ..., patch_x, patch_y], self.data[index, 0, ..., patch_x, patch_y]
     
 class WMVF_baseline(Dataset):
-    def __init__(self, data) -> None:
+    def __init__(self, data, wm_vf=True) -> None:
         super().__init__()
         self._preprocess(data, 'data')
+        self.wm_vf = wm_vf
         
     def _preprocess(self, data, name):
         setattr(self, name, (data).astype(np.float32))
@@ -211,7 +212,10 @@ class WMVF_baseline(Dataset):
         return self.data.shape[0]
     
     def __getitem__(self, index):
-        return self.data[index, 0], self.data[index, 1]
+        if self.wm_vf:
+            return self.data[index, 0], self.data[index, 1] 
+        else:
+            return self.data[index, 1], self.data[index, 0]
     
 # class WSVF(Dataset):
 #     def __init__(self, ws_u, vel_y,
