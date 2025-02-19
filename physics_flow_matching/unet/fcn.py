@@ -39,7 +39,7 @@ class FCN_outblock(nn.Module):
         
 class FCN(nn.Module):
     
-    def __init__(self, pad_size=15, channel_list=[3, 64, 128, 256, 256, 128],
+    def __init__(self, pad_size=16, channel_list=[3, 64, 128, 256, 256, 128],
                  kernel_list=[5, 3, 3, 3, 3], threshold=-1.0, padding="valid"):
         super(FCN, self).__init__()
 

@@ -161,4 +161,5 @@ def main(config_path):
     np.save(config.gen.save_path, samples_all)
     
 if __name__=="__main__":
+    OmegaConf.register_new_resolver("as_tuple", lambda *args: tuple(args))
     main(sys.argv[1])
