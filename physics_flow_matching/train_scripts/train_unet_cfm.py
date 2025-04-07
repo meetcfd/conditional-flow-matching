@@ -10,7 +10,7 @@ from physics_flow_matching.utils.dataloader import get_loaders_vf_fm
 from physics_flow_matching.utils.dataset import DATASETS
 from physics_flow_matching.utils.train import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
-from torchcfm.conditional_flow_matching import FlowMatcher
+from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.tensorboard import SummaryWriter
@@ -42,7 +42,8 @@ def main(config_path):
     train_dataloader = get_loaders_vf_fm(vf_paths=config.dataloader.datapath,
                                         batch_size=config.dataloader.batch_size,
                                         dataset_=DATASETS[config.dataloader.dataset],
-                                        jump=config.dataloader.jump)
+                                        jump=config.dataloader.jump,
+                                        all_vel=config.dataloader.all_vel if hasattr(config.dataloader, 'all_vel') else True)
         
     model = UNetModel(dim=config.unet.dim,
                       channel_mult=config.unet.channel_mult,
@@ -59,9 +60,7 @@ def main(config_path):
 
     model.to(dev)
     
-    FM = FlowMatcher(sigma=config.FM.sigma,
-                     add_heavy_noise=config.FM.add_heavy_noise if hasattr(config.FM, 'add_heavy_noise') else False,
-                     nu=config.FM.nu if hasattr(config.FM, 'nu') else th.inf)
+    FM = ConditionalFlowMatcher(sigma=config.FM.sigma)
     
     optim = Adam(model.parameters(), lr=config.optimizer.lr)
     

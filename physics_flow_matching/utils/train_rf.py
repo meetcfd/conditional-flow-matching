@@ -28,7 +28,8 @@ def train_model(model: nn.Module, FM, train_dataloader,
                 save_epoch_int, print_within_epoch_int, path,
                 device,
                 return_noise=False,
-                restart=False, restart_epoch=None, train_eps=True):
+                class_cond=False,
+                restart=False, restart_epoch=None,train_eps=True):
     
     if restart:
         start_epoch, model, optimizer, sched = restart_func(restart_epoch, path, model, optimizer, sched)
@@ -41,18 +42,21 @@ def train_model(model: nn.Module, FM, train_dataloader,
         iter_val = 0
         epoch_loss = 0.
         
-        for iteration, (x0, x1) in enumerate(train_dataloader):
-            
+        for iteration, info in enumerate(train_dataloader):
+            if not class_cond:
+                x0, x1 = info
+            else:
+                x0, x1, y = info
             if return_noise:
                 t, xt, ut, noise = get_batch(FM, x0.to(device), x1.to(device), return_noise=return_noise)
             else: 
                 t, xt, ut = get_batch(FM, x0.to(device), x1.to(device))
 
             if train_eps:
-                pred_noise = model(t, xt)
+                pred_noise = model(t, xt, y=y.to(device) if class_cond else None)
                 loss = loss_fn(pred_noise, noise)
             else:
-                pred_ut = model(t, xt)
+                pred_ut = model(t, xt, y=y.to(device) if class_cond else None)
                 loss = loss_fn(pred_ut, ut)
                 
             optimizer.zero_grad()

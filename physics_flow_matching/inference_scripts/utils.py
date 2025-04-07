@@ -11,6 +11,8 @@ def partial_wall_pres_forward(x_hat, **kwargs):
     det_model = kwargs["model"]
     x_pred = det_model(x_hat)
     if "mask" not in kwargs.keys(): 
+        if "full" in kwargs.keys():
+            return x_pred
         slice_c = slice(kwargs["sc"], kwargs["ec"])
         slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"])
         return x_pred[..., slice_c, slice_x, slice_y]

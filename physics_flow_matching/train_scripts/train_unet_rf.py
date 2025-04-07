@@ -81,6 +81,7 @@ def main(config_path):
                 restart=config.restart,
                 return_noise=config.FM.return_noise,
                 restart_epoch=config.restart_epoch,
+                class_cond=config.class_cond,
                 train_eps=config.train_eps)
 
 if __name__ == '__main__':

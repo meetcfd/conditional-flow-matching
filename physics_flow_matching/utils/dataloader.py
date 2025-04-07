@@ -297,15 +297,14 @@ def get_loaders_wmvf_baseline(wm_paths, vf_paths, batch_size, time_cutoff, datas
     
 #     return train_dataloader, test_dataloader
 
-def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1):
+def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True):
     
     def norm(d, m, s):
         return (d-m)/s
 
     data = []
     
-    if len(vf_paths) == 3 and type(vf_paths[0]) == np.ndarray:
-        vf_paths = vf_paths[0]
+    if (len(vf_paths) == 3 or len(vf_paths) == 1) and type(vf_paths[0]) == str:
         for path in vf_paths:
             d = np.load(path)
             data.append(d)   
@@ -325,7 +324,7 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1):
     
     data = norm(data, m, s)
 
-    train_dataloader = DataLoader(dataset_(data[::jump]), batch_size=batch_size, shuffle=True)
+    train_dataloader = DataLoader(dataset_(data[::jump], all_vel), batch_size=batch_size, shuffle=True)
        
     return train_dataloader
 

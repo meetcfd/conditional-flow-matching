@@ -9,7 +9,7 @@ from torch.distributions import Chi2
 def infer(dims_of_img, total_samples, samples_per_batch,
           use_odeint, cfm_model, t_start, t_end,
           scale, device, m=None, std=None, t_steps=2, use_heavy_noise=False, 
-          y = None, **kwargs):
+          y = None, y0_provided = False, y0= None, **kwargs):
     
     cfm_model_ = lambda t, x : cfm_model(t, x, y=y)
         
@@ -34,9 +34,9 @@ def infer(dims_of_img, total_samples, samples_per_batch,
         samples_size = (samples_size,) + dims_of_img 
         
         with torch.no_grad():
-            if not use_heavy_noise:
+            if not use_heavy_noise and not y0_provided:
                 y0 = torch.randn(samples_size, device=device)
-            else:
+            elif use_heavy_noise:
                 nu = kwargs["nu"]
                 chi2 = Chi2(torch.tensor([nu]))
                 
@@ -45,7 +45,9 @@ def infer(dims_of_img, total_samples, samples_per_batch,
                 for _ in range(len(dims_of_img)-1):
                     kappa = kappa[..., None]
                 y0 = z/torch.sqrt(kappa)
-                
+            elif y0_provided:
+                y0 = torch.tensor(y0, device=device)
+        
             traj = ode_solver(y0)
             
         out = traj[-1].detach().cpu().numpy()

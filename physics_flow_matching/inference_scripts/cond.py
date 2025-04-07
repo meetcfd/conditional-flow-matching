@@ -99,68 +99,6 @@ def flowgrad(v_theta, cost_func, meas_func, measurement,
             
     return xt.detach().cpu().numpy()#xt.detach().cpu().numpy()
 
-# def oc_flow(f_p, cost_fn, meas_fn, measurement,
-#             max_iterations, lr,
-#             beta, num_of_steps, size,
-#             device, control_update_freq=1, **kwargs):
-#     """
-#     Implements Algorithm 1: OC-Flow on Euclidean Space. (https://arxiv.org/pdf/2410.18070)
-#     """
-
-#     reward_fn = lambda x, x_p: -(cost_fn(meas_fn, x, measurement, **kwargs) + ((x - x_p)**2).mean())
-#     ts = torch.linspace(0, 1, num_of_steps, device=device)
-#     dt = ts[1] - ts[0]
-
-#     x0 = torch.randn(1, *size, device=device) 
-
-#     # Initialize control terms
-#     theta = torch.zeros(num_of_steps//control_update_freq, *x0.shape, device=device)  
-
-#     # Optimization loop
-#     for _ in tqdm(range(max_iterations)):
-#         with torch.no_grad():
-#             # Solve for the state trajectory (Euler discretization)
-#             x_prev = x0.clone()
-#             x_list = [x_prev]
-#             j = 0  # Index for control terms
-#             for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
-#                 if i % control_update_freq == 0:
-#                     x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
-#                 else:
-#                     x_t = x_prev + f_p(t, x_prev) * dt
-#                 x_prev = x_t # Update x_prev for the next iteration
-#                 x_list.append(x_prev)
-#                 if (i + 1) % control_update_freq == 0:  # Update control index
-#                     j += 1
-            
-#             if theta.sum() == 0:
-#                 x_p = x_list[-1].clone().detach()
-                
-#         # Calculate the gradient (adjoint method)
-#         x_prev = x_list.pop().requires_grad_()
-#         grad_x_t = torch.autograd.grad(reward_fn(x_prev, x_p), x_prev, retain_graph=False)[0]
-#         del x_prev
-#         grad_x = [grad_x_t]
-#         for t in (reversed(ts[:-1])):  # Iterate in reverse from the second element
-#             x_t = x_list.pop()
-#             grad_x_t = torch.autograd.functional.vjp(f_p, inputs=(t, x_t), v=grad_x_t)[1][1] ## Gradient blows up for the inpainting task
-#             grad_x.append(grad_x_t)
-#             del x_t
-#         # Update control (no need to store the entire grad_x)
-#         grad_x = torch.stack(grad_x[::-1])
-#         theta = beta * theta + lr * grad_x[::control_update_freq]
-
-#     # Solve for the final state trajectory with optimized control
-#     with torch.no_grad():
-#         x_prev = x0
-#         j = 0  # Index for control terms
-#         for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
-#             x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
-#             x_prev = x_t # Update x_prev for the next iteration
-#             if (i + 1) % control_update_freq == 0:  # Update control index
-#                 j += 1
-#     return x_prev.detach().cpu().numpy()
-
 def d_flow(
     cost_func,
     measurement_func,
@@ -394,7 +332,7 @@ def infer_gradfree_ho(fm : FlowMatcher, cfm_model : torch.nn.Module,
                    num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
                    sample_noise, use_heavy_noise, rf_start,
                    device, **kwargs):
-    """https://arxiv.org/pdf/2411.07625 : gradfree based algorithm with higher order method like Heun's, RK4 method"""
+    """gradfree based algorithm with higher order method like Heun's, RK4 method"""
     
     def heun_step(t, x, dt):
         k1 = cfm_model(t, x)
@@ -459,3 +397,65 @@ def infer_gradfree_ho(fm : FlowMatcher, cfm_model : torch.nn.Module,
         samples.append(x.cpu().numpy())
         
     return np.concatenate(samples)
+
+# def oc_flow(f_p, cost_fn, meas_fn, measurement,
+#             max_iterations, lr,
+#             beta, num_of_steps, size,
+#             device, control_update_freq=1, **kwargs):
+#     """
+#     Implements Algorithm 1: OC-Flow on Euclidean Space. (https://arxiv.org/pdf/2410.18070)
+#     """
+
+#     reward_fn = lambda x, x_p: -(cost_fn(meas_fn, x, measurement, **kwargs) + ((x - x_p)**2).mean())
+#     ts = torch.linspace(0, 1, num_of_steps, device=device)
+#     dt = ts[1] - ts[0]
+
+#     x0 = torch.randn(1, *size, device=device) 
+
+#     # Initialize control terms
+#     theta = torch.zeros(num_of_steps//control_update_freq, *x0.shape, device=device)  
+
+#     # Optimization loop
+#     for _ in tqdm(range(max_iterations)):
+#         with torch.no_grad():
+#             # Solve for the state trajectory (Euler discretization)
+#             x_prev = x0.clone()
+#             x_list = [x_prev]
+#             j = 0  # Index for control terms
+#             for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
+#                 if i % control_update_freq == 0:
+#                     x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
+#                 else:
+#                     x_t = x_prev + f_p(t, x_prev) * dt
+#                 x_prev = x_t # Update x_prev for the next iteration
+#                 x_list.append(x_prev)
+#                 if (i + 1) % control_update_freq == 0:  # Update control index
+#                     j += 1
+            
+#             if theta.sum() == 0:
+#                 x_p = x_list[-1].clone().detach()
+                
+#         # Calculate the gradient (adjoint method)
+#         x_prev = x_list.pop().requires_grad_()
+#         grad_x_t = torch.autograd.grad(reward_fn(x_prev, x_p), x_prev, retain_graph=False)[0]
+#         del x_prev
+#         grad_x = [grad_x_t]
+#         for t in (reversed(ts[:-1])):  # Iterate in reverse from the second element
+#             x_t = x_list.pop()
+#             grad_x_t = torch.autograd.functional.vjp(f_p, inputs=(t, x_t), v=grad_x_t)[1][1] ## Gradient blows up for the inpainting task
+#             grad_x.append(grad_x_t)
+#             del x_t
+#         # Update control (no need to store the entire grad_x)
+#         grad_x = torch.stack(grad_x[::-1])
+#         theta = beta * theta + lr * grad_x[::control_update_freq]
+
+#     # Solve for the final state trajectory with optimized control
+#     with torch.no_grad():
+#         x_prev = x0
+#         j = 0  # Index for control terms
+#         for i, t in enumerate(ts[:-1]):  # Iterate up to the second-to-last element
+#             x_t = x_prev + (f_p(t, x_prev) + theta[j]) * dt
+#             x_prev = x_t # Update x_prev for the next iteration
+#             if (i + 1) % control_update_freq == 0:  # Update control index
+#                 j += 1
+#     return x_prev.detach().cpu().numpy()
