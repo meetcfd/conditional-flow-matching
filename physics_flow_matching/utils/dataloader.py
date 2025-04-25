@@ -304,13 +304,21 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True):
 
     data = []
     
-    if (len(vf_paths) == 3 or len(vf_paths) == 1) and type(vf_paths[0]) == str:
+    if (len(vf_paths) == 3 and type(vf_paths[0]) == str):
         for path in vf_paths:
             d = np.load(path)
-            data.append(d)   
-
+            data.append(d)
         data = np.concatenate(data, axis=1)
         m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
+            
+    elif (len(vf_paths) == 1 and type(vf_paths[0][0]) == str):
+        vf_paths = vf_paths[0]
+        for path in vf_paths:
+            d = np.load(path)
+            data.append(d)
+        data = np.concatenate(data, axis=1)
+        m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
+
     else:
         for uvw_path in vf_paths:
             uvw_data = []    

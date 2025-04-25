@@ -46,6 +46,10 @@ def main(config_path):
     
     dev = config.device
     experimental = config.experimental
+    parallel_flag = config.parallel_flag if "parallel_flag" in config.keys() else False
+    if parallel_flag:
+        start_index = config.parallel.start_index
+        end_index = config.parallel.end_index
     
     # For conditioning on y^+
     wall_norm = {5: 0, 20: 1, 40: 2}
@@ -153,6 +157,9 @@ def main(config_path):
         
     else :
         masks = np.load(meas_specific_kwargs["mask"])
+        if parallel_flag:
+            measurements = measurements[start_index:end_index]
+            masks = masks[start_index:end_index]
         for measurement, mask in zip(measurements, masks):
             samples = infer_grad_4(conditioning=measurement[None], mask=torch.from_numpy(mask).to(device))
             samples_all.append(samples)

@@ -51,7 +51,7 @@ class RectifiedFlow:
             else:
                 self.chi2 = Chi2(self.nu)
     
-    def compute_mu_t(self, x0, x1, t):
+    def compute_mu_t(self, x1, t):
         """
         Compute the mean of the probability path N(t * x1, (1 - t))
 
@@ -68,7 +68,6 @@ class RectifiedFlow:
         mean mu_t: t * x1
         """
         
-        del x0
         t = pad_t_like_x(t, x1)
         return t * x1
 
@@ -87,14 +86,12 @@ class RectifiedFlow:
         
         return 1 - t
 
-    def sample_xt(self, x0, x1, t, epsilon):
+    def sample_xt(self, x1, t, epsilon):
         """
-        Draw a sample from the probability path N(t * x1 + (1 - t) * x0, sigma), see (Eq.14) [1].
+        Draw a sample from the probability path N(t * x1, (1 - t)), see (Eq.14) [1].
 
         Parameters
         ----------
-        x0 : Tensor, shape (bs, *dim)
-            represents the source minibatch
         x1 : Tensor, shape (bs, *dim)
             represents the target minibatch
         t : FloatTensor, shape (bs)
@@ -105,14 +102,14 @@ class RectifiedFlow:
         -------
         xt
         """
-        mu_t = self.compute_mu_t(x0, x1, t)
+        mu_t = self.compute_mu_t(x1, t)
         sigma_t = self.compute_sigma_t(t)
         sigma_t = pad_t_like_x(sigma_t, x1)
         return mu_t + sigma_t * epsilon
     
-    def compute_conditional_flow(self, epsilon, t, xt):
+    def compute_conditional_flow(self, epsilon, t, xt, x1=None):
         """
-        Compute the conditional vector field ut(x1|x0) = (xt - epsilon)/t
+        Compute the conditional vector field ut(x1|x0) = (xt - epsilon)/t or (x1 - epsilon)
 
         Parameters
         ----------
@@ -126,9 +123,12 @@ class RectifiedFlow:
         -------
         ut : conditional vector field ut(x1|x0)
         """
-        t = pad_t_like_x(t, xt)
-        return (xt - epsilon)/t
-    
+        if x1 is None:
+            t = pad_t_like_x(t, xt)
+            return (xt - epsilon)/t
+        else:
+            return x1 - epsilon
+
     def sample_noise_like(self, x):
         if self.heavy_noise:
             z = torch.randn_like(x)
@@ -140,12 +140,10 @@ class RectifiedFlow:
     def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
         """
         Compute the sample xt (drawn from N(t * x1, (1 - t)))
-        and the conditional vector field ut(x1|x0) = (xt - epsilon)/t
+        and the conditional vector field ut(x1|epsilon) = (xt - epsilon)/t or (x1 - epsilon)
 
         Parameters
         ----------
-        x0 : Tensor, shape (bs, *dim)
-            represents the source minibatch
         x1 : Tensor, shape (bs, *dim)
             represents the target minibatch
         (optionally) t : Tensor, shape (bs)
@@ -162,13 +160,14 @@ class RectifiedFlow:
         ut : conditional vector field ut(x1|x0) = (xt - epsilon)/t
         (optionally) epsilon : Tensor, shape (bs, *dim) such that xt = mu_t + sigma_t * epsilon
         """
+        del x0
         if t is None:
-            t = torch.FloatTensor(x0.shape[0]).uniform_(5e-3, 1.).type_as(x0)
-        assert len(t) == x0.shape[0], "t has to have batch size dimension"
+            t = torch.rand(x1.shape[0]).type_as(x1) # t = torch.FloatTensor(x0.shape[0]).uniform_(5e-3, 1.).type_as(x0)
+        assert len(t) == x1.shape[0], "t has to have batch size dimension"
 
-        eps = self.sample_noise_like(x0)
-        xt = self.sample_xt(x0, x1, t, eps)
-        ut = self.compute_conditional_flow(eps, t, xt)
+        eps = self.sample_noise_like(x1)
+        xt = self.sample_xt(x1, t, eps)
+        ut = self.compute_conditional_flow(eps, t, xt, x1)
         if return_noise:
             return t, xt, ut, eps
         else:
@@ -306,7 +305,8 @@ class FlowMatcher:
         dsigma_t = pad_t_like_x(self.sigma - 1, xt)
         sigma_t = pad_t_like_x(self.compute_sigma_t(t), xt)
         return (dsigma_t/sigma_t) * (xt - self.compute_mu_t(x0,x1,t)) + x1
-
+        # return x1 + (self.sigma - 1) * epsilon
+        
     def sample_noise_like(self, x):
         if self.heavy_noise:
             z = torch.randn_like(x)
@@ -562,6 +562,13 @@ class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
         """
         super().__init__(sigma)
         self.ot_sampler = OTPlanSampler(method="exact")
+        
+    def compute_xt(self, x0, x1, t, t_max):
+        """ Used in Energy-Matching for contrastive learning."""
+        eps = self.sample_noise_like(x0)
+        x0, x1 = self.ot_sampler.sample_plan(x0, x1)
+        t_ = torch.where(t < 1., t, 1.)
+        return self.sample_xt(x0, x1, t_, eps)
 
     def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
         r"""

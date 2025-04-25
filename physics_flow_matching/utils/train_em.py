@@ -1,7 +1,7 @@
 import torch as th
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
-from physics_flow_matching.utils.pre_procs_data import get_batch
+from physics_flow_matching.utils.pre_procs_data import get_batch, get_grad_energy, langevin_step
 
 def restart_func(restart_epoch, path, model, optimizer, sched=None):
     assert restart_epoch != None, "restart epoch not initialized!"
@@ -27,9 +27,17 @@ def train_model(model: nn.Module, FM, train_dataloader,
                 num_epochs, print_epoch_int,
                 save_epoch_int, print_within_epoch_int, path,
                 device,
+                contrastive_obj= False,
+                M_lang = 200,
+                eps_max = 1e-2,
+                t_switch = 0.9,
+                t_max = 1.0,
+                dt = 1e-2,
+                weight_cd=2e-5,
                 return_noise=False,
                 class_cond=False,
-                restart=False, restart_epoch=None,train_eps=True):
+                restart=False, 
+                restart_epoch=None):
     
     if restart:
         start_epoch, model, optimizer, sched = restart_func(restart_epoch, path, model, optimizer, sched)
@@ -51,14 +59,22 @@ def train_model(model: nn.Module, FM, train_dataloader,
                 t, xt, ut, noise = get_batch(FM, x0.to(device), x1.to(device), return_noise=return_noise)
             else: 
                 t, xt, ut = get_batch(FM, x0.to(device), x1.to(device))
+            ut_pred = get_grad_energy(xt, model, retain_graph=True, create_graph=True)
 
-            if train_eps:
-                pred_noise = model(t, xt, y=y.to(device) if class_cond else None)
-                loss = loss_fn(pred_noise, noise)
-            else:
-                ut_pred = model(t, xt, y=y.to(device) if class_cond else None)
-                loss = loss_fn(ut_pred, ut)
+            if contrastive_obj:
+                with th.no_grad():
+                    t_neg = t_max*th.rand_like(t)
+                    x_neg = FM.compute_xt(x0.to(device), x1.to(device), t_neg, t_max)
+                    for _ in range(M_lang):
+                        x_neg = langevin_step(x_neg, model, t_neg, t_switch, eps_max, dt)
+                        t_neg = t_neg + dt
+                l_neg = model(x_neg).mean()
+                l_pos = model(x1.to(device)).mean()
+                l_cd = l_pos - l_neg
+            else : 
+                l_cd = 0.
                 
+            loss = loss_fn(ut_pred, ut) + weight_cd * l_cd
             optimizer.zero_grad()
             loss.backward()       
             optimizer.step()      

@@ -14,6 +14,7 @@ class VF_FM(Dataset):
             self.wm_vf = False
         elif self.data.ndim == 5:
             if self.all_vel == True:
+                self.wm_vf = False
                 self.shape = self.data.shape[2:]
                 self.num_yp = self.data.shape[1]
             else:

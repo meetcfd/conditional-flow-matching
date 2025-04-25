@@ -4,7 +4,9 @@ from tqdm import tqdm
 from functools import partial
 from torchcfm.conditional_flow_matching import FlowMatcher, pad_t_like_x
 from torchdiffeq import odeint
-from torch.optim import LBFGS
+from torchdyn.core import NeuralODE
+from torch.optim import LBFGS, SGD
+from physics_flow_matching.inference_scripts.utils import ssag_collect
 
 def flowgrad(v_theta, cost_func, meas_func, measurement,
              device, num_of_samples, size,
@@ -108,8 +110,9 @@ def d_flow(
     ode_solver=odeint,
     ode_solver_kwargs={"method": "midpoint", "t" : torch.linspace(0,1,2), "options": {"step_size": 1/6}},
     optimizer=LBFGS,
-    optimizer_kwargs={"line_search_fn": "strong_wolfe"},
+    optimizer_kwargs={"line_search_fn": "strong_wolfe", "history_size": 10},
     max_iterations=10,
+    full_output=False,
     **kwargs
 ):
     """
@@ -139,8 +142,8 @@ def d_flow(
             flow_model, initial_point, **ode_solver_kwargs
         )[-1]
         loss = cost_func(measurement_func, generated_sample, measurement, **kwargs)
-        loss.backward()
-        return loss
+        loss.sum().backward()
+        return loss.sum()
 
     optimizer = optimizer([initial_point], **optimizer_kwargs)
     
@@ -150,12 +153,77 @@ def d_flow(
        loss = optimizer.step(closure)
        pbar.set_postfix({'distance': loss.item()}, refresh=False)
 
-    return (ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1]).detach().cpu().numpy()
+    return (ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1] if not full_output else ode_solver(flow_model, initial_point, **ode_solver_kwargs)).detach().cpu().numpy()
+
+def d_flow_ssag(
+    cost_func,
+    measurement_func,
+    measurement,
+    flow_model,
+    initial_point,
+    ode_solver=odeint,
+    ode_solver_kwargs={"method": "midpoint", "t" : torch.linspace(0,1,2), "options": {"step_size": 1/6}},
+    optimizer=SGD,
+    optimizer_kwargs={"lr": 1e-3, "momentum": 0.9},
+    max_iterations=100,
+    start_collect_phase=10,
+    cov_rank=20,
+    momt_coll_freq=4,
+    collect_phase_optimizer_kwargs = {"lr": 0.1, "momentum": 0.9},
+    **kwargs
+):
+    """
+    Implements a variant of the D-Flow algorithm with Stochastic Sample Averaging Gaussian
+
+    Args:
+        cost_function: The cost function to be minimized.
+        flow_model: The pre-trained flow model.
+        initial_point: The initial point for optimization.
+        ode_solver: The ODE solver to use. Default is torchdiffeq.odeint.
+        ode_solver_kwargs: Keyword arguments for the ODE solver.
+                            Default is {"method": "midpoint", "options": {"step_size": 1/6}}.
+        optimizer: The optimization algorithm to use. Default is torch.optim.LBFGS.
+        optimizer_kwargs: Keyword arguments for the optimizer.
+                          Default is {"line_search_fn": "strong_wolfe"}.
+        max_iterations: The maximum number of optimization iterations.
+
+    Returns:
+        Mean, diagonal variance, and low rank approximation of covariance matrix on the base distribution space
+    """
+
+    initial_point = torch.nn.Parameter(initial_point)
+    
+    optimizer = optimizer([initial_point], **optimizer_kwargs)
+    
+    pbar = tqdm(list(range(max_iterations)))
+    
+    first_momt = torch.zeros(initial_point.numel(), device=initial_point.device)
+    second_momt = torch.zeros(initial_point.numel(), device=initial_point.device)
+    num_collected = torch.tensor(0, device=initial_point.device)
+    dev_matrix = torch.empty(cov_rank, initial_point.numel(), device=initial_point.device)
+    
+    for epoch in pbar:
+        optimizer.zero_grad()
+        generated_sample = ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1]
+        loss = cost_func(measurement_func, generated_sample, measurement, **kwargs)
+        loss.backward()
+        optimizer.step()
+        pbar.set_postfix({'distance': loss.item()}, refresh=False)
+        
+        if epoch >= start_collect_phase:
+            if epoch == start_collect_phase:
+                for param_group in optimizer.param_groups:
+                    param_group.update(**collect_phase_optimizer_kwargs)
+                     
+            first_momt, second_momt, num_collected, dev_matrix = ssag_collect(initial_point, first_momt, second_momt, epoch,
+                                                                              momt_coll_freq, num_collected, dev_matrix)
+            
+    return first_momt, second_momt, dev_matrix, num_collected
 
 def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
                 samples_per_batch, total_samples, dims_of_img, 
                 num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
-                device, refine, sample_noise, use_heavy_noise, rf_start, **kwargs):
+                device, refine, sample_noise, use_heavy_noise, rf_start, start_provided=False, start_point=None, **kwargs):
     """https://arxiv.org/pdf/2411.07625 : grad based algorithm"""
     
     # torch.manual_seed(seed=42)
@@ -176,7 +244,7 @@ def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
         if kwargs["swag"]:
             kwargs["model"].sample()
 
-        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point#torch.randn(samples_size, device=device)
         conditioning_per_batch = conditioning #conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
         pbar = tqdm(ts[:-1])        
         for t in pbar:
@@ -205,12 +273,11 @@ def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
         
     return np.concatenate(samples)
     
-
 def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
                    samples_per_batch, total_samples, dims_of_img, 
                    num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
                    sample_noise, use_heavy_noise, rf_start,
-                   device, refine, **kwargs):
+                   device, refine, start_provided=False, start_point=None, **kwargs):
     """https://arxiv.org/pdf/2411.07625 : gradfree based algorithm"""
   
     start = 5e-3 if rf_start else 0 
@@ -227,8 +294,8 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
             samples_size = samples_per_batch + total_samples%samples_per_batch
         samples_size = (samples_size,) + dims_of_img 
         
-        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
-        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point #torch.randn(samples_size, device=device)
+        conditioning_per_batch = conditioning #conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
         x_gauss = x.clone().detach()
         first_step = True
         
@@ -264,6 +331,48 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
                       
         samples.append(x.cpu().numpy())
         
+    return np.concatenate(samples)
+
+def infer_parallel(cfm_model : torch.nn.Module,
+                samples_per_batch, total_samples, dims_of_img, 
+                num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+                device, refine, sample_noise, use_heavy_noise, rf_start, start_provided=False, is_grad_free=False, start_point=None, solver=None, **kwargs):
+    """https://arxiv.org/pdf/2411.07625 : grad based algorithm"""
+    
+    # torch.manual_seed(seed=42)
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
+    # dt = ts[1] - ts[0]
+        
+    samples = []
+    cfm_model.guide_func = partial(grad_cost_func, meas_func=meas_func, is_grad_free=is_grad_free, **kwargs)
+    cfm_model.guide_scale = conditioning_scale
+    
+    node = NeuralODE(cfm_model,
+                     solver="euler" if solver is None else solver,
+                     sensitivity="adjoint",
+                     atol=1e-4,
+                     rtol=1e-4)
+    
+    for i in range(total_samples//samples_per_batch):
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img 
+        
+        if kwargs["swag"]:
+            kwargs["model"].sample()
+
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point[i*samples_per_batch:(i+1)*samples_per_batch]
+        assert x.shape[0] == samples_per_batch, f"Batch size mismatch: {x.shape[0]} != {samples_per_batch}"
+        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
+        
+        cfm_model.guide_func = partial(cfm_model.guide_func, measurement=conditioning_per_batch)
+        with torch.no_grad():
+            traj = node.trajectory(x.to(device), t_span=ts)
+
+        samples.append(traj[-1].cpu().numpy())
+                
     return np.concatenate(samples)
 
 def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,

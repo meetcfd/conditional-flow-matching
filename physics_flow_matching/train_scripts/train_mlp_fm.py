@@ -5,12 +5,12 @@ import os
 
 import torch as th
 import numpy as np
-from physics_flow_matching.unet.unet import UNetModelWrapper as UNetModel
-from physics_flow_matching.utils.dataloader import get_loaders_vf_fm
-from physics_flow_matching.utils.dataset import DATASETS
-from physics_flow_matching.utils.train_rf import train_model
+from physics_flow_matching.unet.mlp import MLP_Wrapper as MLP
+from torch.utils.data import DataLoader
+from physics_flow_matching.multi_fidelity.synthetic.dataset import flow_guidance_dists
+from physics_flow_matching.utils.train import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
-from torchcfm.conditional_flow_matching import RectifiedFlow
+from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.tensorboard import SummaryWriter
@@ -39,27 +39,28 @@ def main(config_path):
     
     writer = SummaryWriter(log_dir=logpath)
     
-    train_dataloader = get_loaders_vf_fm(vf_paths=config.dataloader.datapath,
-                                        batch_size=config.dataloader.batch_size,
-                                        dataset_=DATASETS[config.dataloader.dataset],
-                                        jump=config.dataloader.jump)
+    dataset = flow_guidance_dists(dist_name1=config.dataset.dist_name1,
+                                  dist_name2=config.dataset.dist_name2, n=config.dataset.n, seed=config.dataset.seed)
+    #Syn_Data_FM_multi_to_multi(mus1=config.dataset.mus1, covs1=config.dataset.covs1, pis1=config.dataset.pis1,
+    #                                     mus2=config.dataset.mus2, covs2=config.dataset.covs2, pis2=config.dataset.pis2,
+    #                                     n=config.dataset.n, seed=config.dataset.seed)
+    #Syn_Data_FM_multi(mus=config.dataset.mus, covs=config.dataset.covs, pis=config.dataset.pis, n=config.dataset.n, seed=config.dataset.seed) 
+    #Syn_Data_FM(data_params=config.dataset.data_params, n=config.dataset.n, seed=config.dataset.seed)
+    
+    train_dataloader = DataLoader(dataset, batch_size=config.dataloader.batch_size, shuffle=True)
         
-    model = UNetModel(dim=config.unet.dim,
-                      channel_mult=config.unet.channel_mult,
-                      num_channels=config.unet.num_channels,
-                      num_res_blocks=config.unet.res_blocks,
-                      num_head_channels=config.unet.head_chans,
-                      attention_resolutions=config.unet.attn_res,
-                      dropout=config.unet.dropout,
-                      use_new_attention_order=config.unet.new_attn,
-                      use_scale_shift_norm=config.unet.film,
-                      class_cond=config.unet.class_cond,
-                      num_classes=config.unet.num_classes
-                      )
+    model = MLP(input_dim=config.mlp.input_dim,
+                hidden_dims=config.mlp.hidden_dims,
+                output_dim=config.mlp.output_dim
+                )
 
     model.to(dev)
     
-    FM = RectifiedFlow(add_heavy_noise=config.FM.add_heavy_noise, nu=config.FM.nu)
+    FM = ExactOptimalTransportConditionalFlowMatcher(sigma=config.FM.sigma)
+    #ConditionalFlowMatcher(sigma=config.FM.sigma)
+    #FlowMatcher(sigma=config.FM.sigma,
+    #            add_heavy_noise=config.FM.add_heavy_noise if hasattr(config.FM, 'add_heavy_noise') else False,
+    #            nu=config.FM.nu if hasattr(config.FM, 'nu') else th.inf)
     
     optim = Adam(model.parameters(), lr=config.optimizer.lr)
     
@@ -83,8 +84,7 @@ def main(config_path):
                 restart=config.restart,
                 return_noise=config.FM.return_noise,
                 restart_epoch=config.restart_epoch,
-                class_cond=config.unet.class_cond,
-                train_eps=config.train_eps)
+                class_cond=config.mlp.class_cond if hasattr(config.mlp, 'class_cond') else False)
 
 if __name__ == '__main__':
     main(sys.argv[1])
