@@ -110,7 +110,7 @@ def d_flow(
     ode_solver=odeint,
     ode_solver_kwargs={"method": "midpoint", "t" : torch.linspace(0,1,2), "options": {"step_size": 1/6}},
     optimizer=LBFGS,
-    optimizer_kwargs={"line_search_fn": "strong_wolfe", "history_size": 10},
+    optimizer_kwargs={"line_search_fn": "strong_wolfe"},
     max_iterations=10,
     full_output=False,
     **kwargs
@@ -336,7 +336,8 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
 def infer_parallel(cfm_model : torch.nn.Module,
                 samples_per_batch, total_samples, dims_of_img, 
                 num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
-                device, refine, sample_noise, use_heavy_noise, rf_start, start_provided=False, is_grad_free=False, start_point=None, solver=None, **kwargs):
+                device, sample_noise, use_heavy_noise, rf_start, class_index,
+                start_provided=False, is_grad_free=False, start_point=None, solver=None, **kwargs):
     """https://arxiv.org/pdf/2411.07625 : grad based algorithm"""
     
     # torch.manual_seed(seed=42)
@@ -348,13 +349,7 @@ def infer_parallel(cfm_model : torch.nn.Module,
     cfm_model.guide_func = partial(grad_cost_func, meas_func=meas_func, is_grad_free=is_grad_free, **kwargs)
     cfm_model.guide_scale = conditioning_scale
     
-    node = NeuralODE(cfm_model,
-                     solver="euler" if solver is None else solver,
-                     sensitivity="adjoint",
-                     atol=1e-4,
-                     rtol=1e-4)
-    
-    for i in range(total_samples//samples_per_batch):
+    for i in tqdm(range(total_samples//samples_per_batch)):
         samples_size = samples_per_batch
         if i == total_samples//samples_per_batch - 1:
             samples_size = samples_per_batch + total_samples%samples_per_batch
@@ -366,8 +361,17 @@ def infer_parallel(cfm_model : torch.nn.Module,
         x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point[i*samples_per_batch:(i+1)*samples_per_batch]
         assert x.shape[0] == samples_per_batch, f"Batch size mismatch: {x.shape[0]} != {samples_per_batch}"
         conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
-        
+                
         cfm_model.guide_func = partial(cfm_model.guide_func, measurement=conditioning_per_batch)
+        
+        cfm_model.forward = partial(cfm_model.forward, y=class_index.repeat(samples_per_batch)) if cfm_model.num_classes is not None else cfm_model
+        
+        node = NeuralODE(cfm_model,
+                     solver="euler" if solver is None else solver,
+                     sensitivity="adjoint",
+                     atol=1e-4,
+                     rtol=1e-4)
+
         with torch.no_grad():
             traj = node.trajectory(x.to(device), t_span=ts)
 

@@ -5,6 +5,7 @@ from tqdm import tqdm
 from torchdiffeq import odeint
 from functools import partial
 from torch.distributions import Chi2
+from physics_flow_matching.utils.pre_procs_data import get_grad_energy, langevin_step
 
 def infer(dims_of_img, total_samples, samples_per_batch,
           use_odeint, cfm_model, t_start, t_end,
@@ -115,28 +116,34 @@ def infer_rf_noise(dims_of_img, total_samples, samples_per_batch, use_odeint,
 def infer_em(dims_of_img, total_samples, samples_per_batch,
           use_odeint, em_model, t_start, t_end,
           scale, device, m=None, std=None, t_steps=2, use_heavy_noise=False, 
-          y = None, y0_provided = False, y0= None, all_traj=False, **kwargs):
+          y = None, y0_provided = False, y0= None, all_traj=False, 
+          use_langevin=False, t_switch=0.8, eps_max=0.15, dt=0.01, M=300, **kwargs):
     
     y0_ = y0.clone().detach() if y0_provided else None
     
     def em_model_(t, x):
-        with torch.enable_grad():
-            x.requires_grad_(True)
-            v_pred = em_model(x)
-            return (torch.autograd.grad(v_pred, x, grad_outputs=torch.ones_like(v_pred).to(v_pred), retain_graph=True)[0]).detach()
+        return - get_grad_energy(x, em_model)
         
     samples_list = []
-    
-    if use_odeint:
-        ode_solver_ = partial(odeint, func=em_model_, t=torch.linspace(t_start, t_end, t_steps, device=device), 
-                            atol=1e-5, rtol=1e-5, 
-                            method=kwargs["method"] if "method" in kwargs.keys() else None,
-                            options=kwargs["options"] if "options" in kwargs.keys() else None)
-        ode_solver = lambda x : ode_solver_(y0=x)
+    if not use_langevin:
+        if use_odeint:
+            ode_solver_ = partial(odeint, func=em_model_, t=torch.linspace(t_start, t_end, t_steps, device=device), 
+                                atol=1e-5, rtol=1e-5, 
+                                method=kwargs["method"] if "method" in kwargs.keys() else None,
+                                options=kwargs["options"] if "options" in kwargs.keys() else None)
+            ode_solver = lambda x : ode_solver_(y0=x)
+        else:
+            ode = NeuralODE(em_model_, kwargs["method"], sensitivity="adjoint", atol=1e-5, rtol=1e-5)
+            ode_solver_ = partial(ode.trajectory, t_span=torch.linspace(t_start, t_end, t_steps, device=device))
+            ode_solver = lambda x: ode_solver_(x=x)
     else:
-        ode = NeuralODE(em_model_, kwargs["method"], sensitivity="adjoint", atol=1e-5, rtol=1e-5)
-        ode_solver_ = partial(ode.trajectory, t_span=torch.linspace(t_start, t_end, t_steps, device=device))
-        ode_solver = lambda x: ode_solver_(x=x)
+        ode_solver_ = partial(langevin_step, model=em_model, t_switch=t_switch, eps_max=eps_max, dt=dt)
+        def ode_solver(x):
+            traj = [x]
+            for i in range(0, M): # langevin MCMC steps
+                x = ode_solver_(x, t=(i)*dt*torch.ones(x.shape[0]).to(device).unsqueeze(-1))
+                traj.append(x)
+            return torch.stack(traj, dim=0)
     
     for i in tqdm(range(total_samples//samples_per_batch)):
         

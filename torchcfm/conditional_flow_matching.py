@@ -563,12 +563,12 @@ class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
         super().__init__(sigma)
         self.ot_sampler = OTPlanSampler(method="exact")
         
-    def compute_xt(self, x0, x1, t, t_max):
-        """ Used in Energy-Matching for contrastive learning."""
-        eps = self.sample_noise_like(x0)
-        x0, x1 = self.ot_sampler.sample_plan(x0, x1)
-        t_ = torch.where(t < 1., t, 1.)
-        return self.sample_xt(x0, x1, t_, eps)
+    # def compute_xt(self, x0, x1, t, t_max):
+    #     """ Used in Energy-Matching for contrastive learning."""
+    #     eps = self.sample_noise_like(x0)
+    #     x0, x1 = self.ot_sampler.sample_plan(x0, x1)
+    #     t_ = torch.where(t < 1., t, 1.)
+    #     return self.sample_xt(x0, x1, t_, eps)
 
     def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
         r"""

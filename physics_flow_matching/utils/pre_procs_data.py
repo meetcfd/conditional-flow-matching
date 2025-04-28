@@ -24,18 +24,11 @@ def get_epsilon(t, t_switch, eps_max):
     return th.where(t < t_switch, th.zeros_like(t),
                     th.where(t < 1, 
                     eps_max * (t - t_switch) / (1 - t_switch), eps_max * th.ones_like(t)))
-    # if t < t_switch:
-    #     return th.zeros_like(t)
-    # elif t_switch < t and t < 1:
-    #     return eps_max * (t - t_switch) / (1 - t_switch)
-    # else:
-    #     return eps_max * th.ones_like(t)
     
 def langevin_step(x, model, t, t_switch, eps_max, dt, retain_graph=False, create_graph=False):
     noise = th.randn_like(x)
     grad_v = get_grad_energy(x, model, retain_graph=retain_graph, create_graph=create_graph)
     eps = get_epsilon(t, t_switch, eps_max)
     
-    x = x + th.sqrt(2 * dt * eps) * noise
-    x = x - dt * grad_v
+    x = x - dt * grad_v + th.sqrt(2 * dt * eps) * noise #.unsqueeze(-1)
     return x

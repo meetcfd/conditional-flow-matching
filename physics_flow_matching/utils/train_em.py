@@ -2,6 +2,7 @@ import torch as th
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
 from physics_flow_matching.utils.pre_procs_data import get_batch, get_grad_energy, langevin_step
+import numpy as np
 
 def restart_func(restart_epoch, path, model, optimizer, sched=None):
     assert restart_epoch != None, "restart epoch not initialized!"
@@ -31,7 +32,6 @@ def train_model(model: nn.Module, FM, train_dataloader,
                 M_lang = 200,
                 eps_max = 1e-2,
                 t_switch = 0.9,
-                t_max = 1.0,
                 dt = 1e-2,
                 weight_cd=2e-5,
                 return_noise=False,
@@ -56,15 +56,15 @@ def train_model(model: nn.Module, FM, train_dataloader,
             else:
                 x0, x1, y = info
             if return_noise:
-                t, xt, ut, noise = get_batch(FM, x0.to(device), x1.to(device), return_noise=return_noise)
+                _, xt, ut, noise = get_batch(FM, x0.to(device), x1.to(device), return_noise=return_noise)
             else: 
-                t, xt, ut = get_batch(FM, x0.to(device), x1.to(device))
-            ut_pred = get_grad_energy(xt, model, retain_graph=True, create_graph=True)
+                _, xt, ut = get_batch(FM, x0.to(device), x1.to(device))
+            ut_pred = - get_grad_energy(xt, model, retain_graph=True, create_graph=True)
 
             if contrastive_obj:
                 with th.no_grad():
-                    t_neg = t_max*th.rand_like(t)
-                    x_neg = FM.compute_xt(x0.to(device), x1.to(device), t_neg, t_max)
+                    t_neg = th.from_numpy(np.random.choice(2, x1.shape[0])).to(device).unsqueeze(-1)
+                    x_neg = th.where(t_neg == 0, th.randn_like(x1.to(device)), x1.to(device))
                     for _ in range(M_lang):
                         x_neg = langevin_step(x_neg, model, t_neg, t_switch, eps_max, dt)
                         t_neg = t_neg + dt

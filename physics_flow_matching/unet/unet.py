@@ -6,6 +6,7 @@ import numpy as np
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
+from functools import partial
 
 from .fp16_util import convert_module_to_f16, convert_module_to_f32
 from .nn import (
@@ -925,3 +926,59 @@ class UNetModelWrapper(UNetModel):
 
     def forward(self, t, x, y=None, *args, **kwargs):
         return super().forward(t, x, y=y)
+
+class GuidedUNetModelWrapper(UNetModelWrapper):
+    def __init__(
+        self,
+        dim,
+        num_channels,
+        num_res_blocks,
+        guide_func=None,
+        channel_mult=None,
+        learn_sigma=False,
+        class_cond=False,
+        num_classes=NUM_CLASSES,
+        use_checkpoint=False,
+        attention_resolutions="16",
+        num_heads=1,
+        num_head_channels=-1,
+        num_heads_upsample=-1,
+        use_scale_shift_norm=False,
+        dropout=0,
+        resblock_updown=False,
+        use_fp16=False,
+        use_new_attention_order=False,
+        guide_scheduler_func=lambda t : 1.0,
+        guide_scale=1.
+    ):
+            
+        super().__init__(
+        dim=dim,
+        num_channels=num_channels,
+        num_res_blocks=num_res_blocks,
+        channel_mult=channel_mult,
+        learn_sigma=learn_sigma,
+        class_cond=class_cond,
+        num_classes=num_classes,
+        use_checkpoint=use_checkpoint,
+        attention_resolutions=attention_resolutions,
+        num_heads=num_heads,
+        num_head_channels=num_head_channels,
+        num_heads_upsample=num_heads_upsample,
+        use_scale_shift_norm=use_scale_shift_norm,
+        dropout=dropout,
+        resblock_updown=resblock_updown,
+        use_fp16=use_fp16,
+        use_new_attention_order=use_new_attention_order,
+        )
+        
+        self.guide_func = guide_func
+        self.guide_scale = guide_scale
+        self.guide_scheduler_func = guide_scheduler_func
+
+
+    def forward(self, t, x, y=None, *args, **kwargs):
+        dx_dt = super().forward(t, x, y)
+        if self.guide_func is not None:
+            dx_dt = dx_dt + self.guide_func(t=t, x=x, v=dx_dt, cfm_model=partial(super().forward, y=y)) * self.guide_scale * self.guide_scheduler_func(t)
+        return dx_dt

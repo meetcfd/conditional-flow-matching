@@ -75,7 +75,13 @@ def grad_cost_func_parallel(t, x, v, cfm_model, **kwargs): #meas_func, x, measur
         diff_norm =  cost_func_parallel(x_hat=x_hat, **kwargs) if "cost_func" not in kwargs.keys() else kwargs["cost_func"](x_hat=x_hat, **kwargs)
         grad = torch.autograd.grad(diff_norm.sum(), x, create_graph=True)[0]
     
-    unit_grad = grad / torch.linalg.norm(grad, dim=0)
+    grad_norm = torch.linalg.norm(grad.flatten(start_dim=1), dim=1)
+    v_norm = torch.linalg.norm(v.flatten(start_dim=1), dim=1)
+    for _ in range(grad.ndim - 1):
+        grad_norm = grad_norm[..., None]
+        v_norm = v_norm[..., None]
+        
+    unit_grad = v_norm * grad / grad_norm
     
     return -unit_grad
 
