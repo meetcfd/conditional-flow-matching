@@ -101,10 +101,10 @@ def sample_noise(samples_size, dims_of_img, use_heavy_noise, device, **kwargs):
     
 def ssag_collect(sample : torch.Tensor, first_momt : torch.Tensor, second_momt : torch.Tensor, 
                  current_iter :int, momt_coll_freq : int,
-                 num_collected : torch.Tensor, dev_matrix : torch.Tensor):
+                 num_collected : torch.Tensor, dev_matrix : torch.Tensor, parallel : bool = False):
     
     if current_iter % momt_coll_freq == 0:
-        flat_sample = torch.cat([p.flatten() for p in sample]).detach()
+        flat_sample = torch.cat([p.flatten() for p in sample]).detach() if not parallel else sample.view(sample.shape[0], -1).detach()
         first_momt = (num_collected*first_momt + flat_sample)/(num_collected + 1)
         second_momt = (num_collected*second_momt + flat_sample**2)/(num_collected + 1)
         num_collected += 1
@@ -126,12 +126,12 @@ def ssag_get_norm_params(first_momt, second_momt, dev_matrix, visualize=False, s
     else:
         return mean, diag_var
     
-def ssag_sample(first_momt :torch.Tensor, second_momt: torch.Tensor, dev_matrix: torch.Tensor, sample_view, device, scale=0.5):
+def ssag_sample(first_momt :torch.Tensor, second_momt: torch.Tensor, dev_matrix: torch.Tensor, sample_view, device, parallel, scale=0.5):
     K = dev_matrix.shape[0]
     mean, diag_var = ssag_get_norm_params(first_momt, second_momt, dev_matrix)
     term1 = scale**0.5 * diag_var.sqrt() * torch.randn_like(diag_var)
-    term2 = (scale * 1/(K-1))**0.5 * dev_matrix.T @ torch.randn(K, device=device)
-    return (mean + term1 + term2).view(sample_view)
+    term2 = (scale * 1/(K-1))**0.5 * dev_matrix.T @ torch.randn(K, device=device) if not parallel else (scale * 1/(K-1))**0.5 * torch.transpose(dev_matrix, 0, -1) @ torch.randn(K, device=device)
+    return (mean + term1 + term2).view(sample_view) if not parallel else (mean + term1 + term2.T).view(sample_view)
     
 MEAS_MODELS = {"inpainting": inpainting, "partial_wall_pres_forward": partial_wall_pres_forward,
                "coarse_wall_pres_forward": coarse_wall_pres_forward}

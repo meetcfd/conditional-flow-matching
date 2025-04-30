@@ -113,6 +113,8 @@ def d_flow(
     optimizer_kwargs={"line_search_fn": "strong_wolfe"},
     max_iterations=10,
     full_output=False,
+    regularize=False,
+    reg_scale=1e-2,
     **kwargs
 ):
     """
@@ -133,8 +135,29 @@ def d_flow(
     Returns:
         The generated sample after optimization.
     """
-
+    
+    # dims = initial_point.dim() -1
+    d = initial_point.view(initial_point.shape[0], -1).size(1)
     initial_point = torch.nn.Parameter(initial_point)
+    
+    def reg1(x):
+        
+        x = x.view(x.shape[0], -1)
+        x_norm_sq = torch.clamp(torch.sum(x**2, dim=1),min=1e-6, max=1e6)
+        # for _ in range(dims):
+        #     x_norm_sq = x_norm_sq[..., None]
+        x_norm = torch.sqrt(x_norm_sq)
+        
+        return (d - 1)*torch.log(x_norm + 1e-5) - x_norm_sq*0.5
+    
+    def reg2(x):
+        
+        x = x.view(x.shape[0], -1)
+        x_norm_sq = torch.clamp(torch.sum(x**2, dim=1),min=1e-6, max=1e6)
+        # for _ in range(dims):
+        #     x_norm_sq = x_norm_sq[..., None]
+        
+        return x_norm_sq
 
     def closure():
         optimizer.zero_grad()
@@ -142,6 +165,8 @@ def d_flow(
             flow_model, initial_point, **ode_solver_kwargs
         )[-1]
         loss = cost_func(measurement_func, generated_sample, measurement, **kwargs)
+        if regularize:
+            loss = loss + reg_scale*reg2(initial_point)
         loss.sum().backward()
         return loss.sum()
 
@@ -170,6 +195,9 @@ def d_flow_ssag(
     cov_rank=20,
     momt_coll_freq=4,
     collect_phase_optimizer_kwargs = {"lr": 0.1, "momentum": 0.9},
+    regularize=False,
+    reg_scale=1e-2,
+    parallel=False,
     **kwargs
 ):
     """
@@ -190,25 +218,39 @@ def d_flow_ssag(
     Returns:
         Mean, diagonal variance, and low rank approximation of covariance matrix on the base distribution space
     """
-
+    
+    # dims = initial_point.dim() -1
+    
     initial_point = torch.nn.Parameter(initial_point)
-    
     optimizer = optimizer([initial_point], **optimizer_kwargs)
-    
     pbar = tqdm(list(range(max_iterations)))
     
-    first_momt = torch.zeros(initial_point.numel(), device=initial_point.device)
-    second_momt = torch.zeros(initial_point.numel(), device=initial_point.device)
+    first_momt = torch.zeros(initial_point.numel(), device=initial_point.device) if not parallel else torch.zeros_like(initial_point.view(initial_point.shape[0], -1), device=initial_point.device).requires_grad_(False)
+    second_momt = torch.zeros(initial_point.numel(), device=initial_point.device) if not parallel else first_momt.clone().requires_grad_(False)
     num_collected = torch.tensor(0, device=initial_point.device)
-    dev_matrix = torch.empty(cov_rank, initial_point.numel(), device=initial_point.device)
+    dev_matrix = torch.zeros(cov_rank, initial_point.numel(), device=initial_point.device) if not parallel else torch.zeros(cov_rank, *first_momt.shape, device=initial_point.device).requires_grad_(False)
+    
+    def reg2(x):
+        if not parallel:
+            x_norm_sq = torch.clamp(torch.sum(x**2), max=1e6)
+            return x_norm_sq
+        else:
+            x = x.view(x.shape[0], -1)
+            x_norm_sq = torch.clamp(torch.sum(x**2, dim=1),min=1e-6, max=1e6)
+            # for _ in range(dims):
+            #     x_norm_sq = x_norm_sq[..., None]
+        
+            return x_norm_sq
     
     for epoch in pbar:
         optimizer.zero_grad()
         generated_sample = ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1]
         loss = cost_func(measurement_func, generated_sample, measurement, **kwargs)
-        loss.backward()
+        if regularize:
+            loss = loss + reg_scale*reg2(initial_point)
+        loss.backward() if not parallel else loss.sum().backward()
         optimizer.step()
-        pbar.set_postfix({'distance': loss.item()}, refresh=False)
+        pbar.set_postfix({'distance': loss.item() if not parallel else loss.sum().item()}, refresh=False)
         
         if epoch >= start_collect_phase:
             if epoch == start_collect_phase:
@@ -216,7 +258,7 @@ def d_flow_ssag(
                     param_group.update(**collect_phase_optimizer_kwargs)
                      
             first_momt, second_momt, num_collected, dev_matrix = ssag_collect(initial_point, first_momt, second_momt, epoch,
-                                                                              momt_coll_freq, num_collected, dev_matrix)
+                                                                              momt_coll_freq, num_collected, dev_matrix, parallel)
             
     return first_momt, second_momt, dev_matrix, num_collected
 
@@ -336,9 +378,8 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
 def infer_parallel(cfm_model : torch.nn.Module,
                 samples_per_batch, total_samples, dims_of_img, 
                 num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
-                device, sample_noise, use_heavy_noise, rf_start, class_index,
+                device, sample_noise, use_heavy_noise, rf_start, class_index=None,
                 start_provided=False, is_grad_free=False, start_point=None, solver=None, **kwargs):
-    """https://arxiv.org/pdf/2411.07625 : grad based algorithm"""
     
     # torch.manual_seed(seed=42)
     start = 5e-3 if rf_start else 0 
@@ -364,7 +405,7 @@ def infer_parallel(cfm_model : torch.nn.Module,
                 
         cfm_model.guide_func = partial(cfm_model.guide_func, measurement=conditioning_per_batch)
         
-        cfm_model.forward = partial(cfm_model.forward, y=class_index.repeat(samples_per_batch)) if cfm_model.num_classes is not None else cfm_model
+        cfm_model.forward = partial(cfm_model.forward, y=class_index.repeat(samples_per_batch)) if hasattr(cfm_model, "num_classes") and cfm_model.num_classes is not None else cfm_model
         
         node = NeuralODE(cfm_model,
                      solver="euler" if solver is None else solver,
