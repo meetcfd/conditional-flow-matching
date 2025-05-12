@@ -115,6 +115,7 @@ def d_flow(
     full_output=False,
     regularize=False,
     reg_scale=1e-2,
+    pretrain=False,
     **kwargs
 ):
     """
@@ -143,20 +144,15 @@ def d_flow(
     def reg1(x):
         
         x = x.view(x.shape[0], -1)
-        x_norm_sq = torch.clamp(torch.sum(x**2, dim=1),min=1e-6, max=1e6)
-        # for _ in range(dims):
-        #     x_norm_sq = x_norm_sq[..., None]
-        x_norm = torch.sqrt(x_norm_sq)
+        x_norm_sq = torch.clamp(0.5*torch.sum(x**2, dim=1),min=1e-6, max=1e6)
+        x_norm = torch.sqrt(torch.sum(x**2, dim=1))#torch.sqrt(x_norm_sq)
         
-        return (d - 1)*torch.log(x_norm + 1e-5) - x_norm_sq*0.5
+        return (d - 1)*torch.log(x_norm + 1e-5) - x_norm_sq
     
     def reg2(x):
         
         x = x.view(x.shape[0], -1)
-        x_norm_sq = torch.clamp(torch.sum(x**2, dim=1),min=1e-6, max=1e6)
-        # for _ in range(dims):
-        #     x_norm_sq = x_norm_sq[..., None]
-        
+        x_norm_sq = torch.clamp(torch.mean(x**2, dim=1),min=1e-6, max=1e6)  #torch.clamp(torch.sum(x**2, dim=1),min=1e-6, max=1e6)  
         return x_norm_sq
 
     def closure():
@@ -178,7 +174,100 @@ def d_flow(
        loss = optimizer.step(closure)
        pbar.set_postfix({'distance': loss.item()}, refresh=False)
 
-    return (ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1] if not full_output else ode_solver(flow_model, initial_point, **ode_solver_kwargs)).detach().cpu().numpy()
+    if not pretrain:
+        return (ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1] if not full_output else ode_solver(flow_model, initial_point, **ode_solver_kwargs)).detach().cpu().numpy()
+    else: 
+        return initial_point.detach()
+
+def d_flow_sgld(
+    cost_func,
+    measurement_func,
+    measurement,
+    flow_model,
+    initial_point,
+    ode_solver=odeint,
+    ode_solver_kwargs={"method": "midpoint", "t" : torch.linspace(0,1,2), "options": {"step_size": 1/6}},
+    max_iterations=100,
+    step_size=0.01,
+    noise_step = 1,
+    start_collect_phase=10,
+    cov_rank=20,
+    momt_coll_freq=4,
+    regularize=False,
+    reg_scale=1e-2,
+    parallel=False,
+    rms_prop_precond = False,
+    beta = 0.9,
+    delta = 1e-8,
+    **kwargs
+):
+    """
+    Implements a variant of the D-Flow algorithm with Stochastic Sample Averaging Gaussian
+
+    Args:
+        cost_function: The cost function to be minimized.
+        flow_model: The pre-trained flow model.
+        initial_point: The initial point for optimization.
+        ode_solver: The ODE solver to use. Default is torchdiffeq.odeint.
+        ode_solver_kwargs: Keyword arguments for the ODE solver.
+                            Default is {"method": "midpoint", "options": {"step_size": 1/6}}.
+        optimizer: The optimization algorithm to use. Default is torch.optim.LBFGS.
+        optimizer_kwargs: Keyword arguments for the optimizer.
+                          Default is {"line_search_fn": "strong_wolfe"}.
+        max_iterations: The maximum number of optimization iterations.
+
+    Returns:
+        Mean, diagonal variance, and low rank approximation of covariance matrix on the base distribution space
+    """
+    
+    # dims = initial_point.dim() -1
+    pbar = tqdm(list(range(max_iterations)))
+    
+    first_momt = torch.zeros(initial_point.numel(), device=initial_point.device) if not parallel else torch.zeros_like(initial_point.view(initial_point.shape[0], -1), device=initial_point.device).requires_grad_(False)
+    second_momt = torch.zeros(initial_point.numel(), device=initial_point.device) if not parallel else first_momt.clone().requires_grad_(False)
+    num_collected = torch.tensor(0, device=initial_point.device)
+    dev_matrix = torch.zeros(cov_rank, initial_point.numel(), device=initial_point.device) if not parallel else torch.zeros(cov_rank, *first_momt.shape, device=initial_point.device).requires_grad_(False)
+    
+    V = torch.zeros_like(initial_point)
+    
+    def reg2(x):
+        if not parallel:
+            x_norm_sq = torch.clamp(torch.sum(x**2), max=1e6)
+            return x_norm_sq
+        else:
+            x = x.view(x.shape[0], -1)
+            x_norm_sq = torch.clamp(torch.sum(x**2, dim=1),min=1e-6, max=1e6)
+        
+            return x_norm_sq
+    
+    for epoch in pbar:
+        
+        with torch.no_grad():
+            
+            with torch.enable_grad():
+                initial_point.requires_grad_()
+                generated_sample = ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1]
+                loss = cost_func(measurement_func, generated_sample, measurement, **kwargs)
+                
+                if regularize:
+                    loss = loss + reg_scale*reg2(initial_point)
+                    
+                grad_init_point = torch.autograd.grad(loss if not parallel else loss.sum(), initial_point)[0]
+           
+            if not rms_prop_precond:
+                initial_point = initial_point - step_size[epoch] * grad_init_point + torch.sqrt(2 * step_size[epoch] * noise_step) * torch.randn_like(initial_point)
+            else:
+                V = beta * V + (1 - beta) * grad_init_point**2
+                G = 1/(torch.sqrt(V) + delta)
+                initial_point = initial_point - step_size[epoch] * G * grad_init_point + torch.sqrt(2 * step_size[epoch] * G * noise_step) * torch.randn_like(initial_point)
+                
+            pbar.set_postfix({'distance': loss.item() if not parallel else loss.sum().item()}, refresh=False)
+            
+            if epoch >= start_collect_phase:                
+                first_momt, second_momt, num_collected, dev_matrix = ssag_collect(initial_point, first_momt, second_momt, epoch,
+                                                                                momt_coll_freq, num_collected, dev_matrix, parallel)
+            
+    return first_momt, second_momt, dev_matrix, num_collected
 
 def d_flow_ssag(
     cost_func,
@@ -378,7 +467,7 @@ def infer_gradfree(fm : FlowMatcher, cfm_model : torch.nn.Module,
 def infer_parallel(cfm_model : torch.nn.Module,
                 samples_per_batch, total_samples, dims_of_img, 
                 num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
-                device, sample_noise, use_heavy_noise, rf_start, class_index=None,
+                device, sample_noise, use_heavy_noise, rf_start, class_index=None, all_traj=False,
                 start_provided=False, is_grad_free=False, start_point=None, solver=None, **kwargs):
     
     # torch.manual_seed(seed=42)
@@ -416,141 +505,141 @@ def infer_parallel(cfm_model : torch.nn.Module,
         with torch.no_grad():
             traj = node.trajectory(x.to(device), t_span=ts)
 
-        samples.append(traj[-1].cpu().numpy())
+        samples.append(traj[-1].cpu().numpy() if not all_traj else traj.cpu().numpy())
                 
-    return np.concatenate(samples)
+    return np.concatenate(samples)  if not all_traj else np.concatenate(samples, axis=1) 
 
-def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
-                   samples_per_batch, total_samples, dims_of_img, 
-                   num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
-                   sample_noise, use_heavy_noise, rf_start,
-                   device, refine, **kwargs):
-    """Use finite difference to approx the u(t,x)"""
+# def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
+#                    samples_per_batch, total_samples, dims_of_img, 
+#                    num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+#                    sample_noise, use_heavy_noise, rf_start,
+#                    device, refine, **kwargs):
+#     """Use finite difference to approx the u(t,x)"""
   
-    start = 5e-3 if rf_start else 0 
-    ts = torch.linspace(start, 1, num_of_steps, device=device)
-    dt = ts[1] - ts[0]
+#     start = 5e-3 if rf_start else 0 
+#     ts = torch.linspace(start, 1, num_of_steps, device=device)
+#     dt = ts[1] - ts[0]
     
-    samples_per_batch = 1
+#     samples_per_batch = 1
     
-    samples = []
+#     samples = []
     
-    for i in range(total_samples//samples_per_batch):
-        samples_size = samples_per_batch
-        if i == total_samples//samples_per_batch - 1:
-            samples_size = samples_per_batch + total_samples%samples_per_batch
-        samples_size = (samples_size,) + dims_of_img 
+#     for i in range(total_samples//samples_per_batch):
+#         samples_size = samples_per_batch
+#         if i == total_samples//samples_per_batch - 1:
+#             samples_size = samples_per_batch + total_samples%samples_per_batch
+#         samples_size = (samples_size,) + dims_of_img 
         
-        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
-        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
-        first_step = True
+#         x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
+#         conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
+#         first_step = True
         
-        pbar = tqdm(ts[:-1])        
-        for t in pbar:
-            _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
-            beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
-                             pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
+#         pbar = tqdm(ts[:-1])        
+#         for t in pbar:
+#             _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
+#             beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
+#                              pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
 
-            x_fixed = x.clone().detach()
+#             x_fixed = x.clone().detach()
             
-            for _ in range(refine): ##Picard Iteration
+#             for _ in range(refine): ##Picard Iteration
 
-                x = x.requires_grad_()
-                v = cfm_model(t, x)
+#                 x = x.requires_grad_()
+#                 v = cfm_model(t, x)
                 
-                if first_step:
-                    first_step=False
-                    x = x + v*dt
-                    x = x.detach()
-                    x_prev = x_fixed.clone().detach()
-                    break
+#                 if first_step:
+#                     first_step=False
+#                     x = x + v*dt
+#                     x = x.detach()
+#                     x_prev = x_fixed.clone().detach()
+#                     break
                 
-                else:
-                    scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
-                                                    is_grad_free=True, use_fd=True, grad_free={"x_prev" : x_prev, "dt": dt, "t" : t},
-                                                    **kwargs)
-                    pbar.set_postfix({'distance': loss}, refresh=False)
-                    scaled_grad *=  torch.linalg.norm(v.flatten())
-                    v = v - conditioning_scale*scaled_grad #beta
-                    x = x_fixed + (v)*dt #
+#                 else:
+#                     scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
+#                                                     is_grad_free=True, use_fd=True, grad_free={"x_prev" : x_prev, "dt": dt, "t" : t},
+#                                                     **kwargs)
+#                     pbar.set_postfix({'distance': loss}, refresh=False)
+#                     scaled_grad *=  torch.linalg.norm(v.flatten())
+#                     v = v - conditioning_scale*scaled_grad #beta
+#                     x = x_fixed + (v)*dt #
                 
-                x = x.detach()
-                x_prev = x_fixed.clone().detach()
+#                 x = x.detach()
+#                 x_prev = x_fixed.clone().detach()
                      
-        samples.append(x.cpu().numpy())
+#         samples.append(x.cpu().numpy())
         
-    return np.concatenate(samples)
+#     return np.concatenate(samples)
 
-def infer_gradfree_ho(fm : FlowMatcher, cfm_model : torch.nn.Module,
-                   samples_per_batch, total_samples, dims_of_img, 
-                   num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
-                   sample_noise, use_heavy_noise, rf_start,
-                   device, **kwargs):
-    """gradfree based algorithm with higher order method like Heun's, RK4 method"""
+# def infer_gradfree_ho(fm : FlowMatcher, cfm_model : torch.nn.Module,
+#                    samples_per_batch, total_samples, dims_of_img, 
+#                    num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+#                    sample_noise, use_heavy_noise, rf_start,
+#                    device, **kwargs):
+#     """gradfree based algorithm with higher order method like Heun's, RK4 method"""
     
-    def heun_step(t, x, dt):
-        k1 = cfm_model(t, x)
-        if t + dt >= 1.:
-            return k1
-        k2 = cfm_model(t + dt, x + k1*dt)
-        return 0.5*(k1 + k2)
+#     def heun_step(t, x, dt):
+#         k1 = cfm_model(t, x)
+#         if t + dt >= 1.:
+#             return k1
+#         k2 = cfm_model(t + dt, x + k1*dt)
+#         return 0.5*(k1 + k2)
     
-    def rk4_step(t, x, dt):
-        k1 = cfm_model(t, x)
-        if t + dt >= 1.:
-            return k1
-        k2 = cfm_model(t + 0.5*dt, x + 0.5*k1*dt)
-        k3 = cfm_model(t + 0.5*dt, x + 0.5*k2*dt)
-        k4 = cfm_model(t + dt, x + k3*dt)
-        return (k1 + 2*k2 + 2*k3 + k4)/6.
+#     def rk4_step(t, x, dt):
+#         k1 = cfm_model(t, x)
+#         if t + dt >= 1.:
+#             return k1
+#         k2 = cfm_model(t + 0.5*dt, x + 0.5*k1*dt)
+#         k3 = cfm_model(t + 0.5*dt, x + 0.5*k2*dt)
+#         k4 = cfm_model(t + dt, x + k3*dt)
+#         return (k1 + 2*k2 + 2*k3 + k4)/6.
   
-    start = 5e-3 if rf_start else 0 
-    ts = torch.linspace(start, 1, num_of_steps, device=device)
-    dt = ts[1] - ts[0]
+#     start = 5e-3 if rf_start else 0 
+#     ts = torch.linspace(start, 1, num_of_steps, device=device)
+#     dt = ts[1] - ts[0]
     
-    samples_per_batch = 1
+#     samples_per_batch = 1
     
-    samples = []
+#     samples = []
     
-    for i in range(total_samples//samples_per_batch):
-        samples_size = samples_per_batch
-        if i == total_samples//samples_per_batch - 1:
-            samples_size = samples_per_batch + total_samples%samples_per_batch
-        samples_size = (samples_size,) + dims_of_img 
+#     for i in range(total_samples//samples_per_batch):
+#         samples_size = samples_per_batch
+#         if i == total_samples//samples_per_batch - 1:
+#             samples_size = samples_per_batch + total_samples%samples_per_batch
+#         samples_size = (samples_size,) + dims_of_img 
         
-        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
-        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
-        x_gauss = x.clone().detach()
-        first_step = True
+#         x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"])#torch.randn(samples_size, device=device)
+#         conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
+#         x_gauss = x.clone().detach()
+#         first_step = True
         
-        pbar = tqdm(ts[:-1])        
-        for t in pbar:
-            _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
-            beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
-                             pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
+#         pbar = tqdm(ts[:-1])        
+#         for t in pbar:
+#             _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
+#             beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
+#                              pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
 
             
-            x = x.requires_grad_()
-            v = rk4_step(t, x, dt)#heun_step(t, x, dt)
+#             x = x.requires_grad_()
+#             v = rk4_step(t, x, dt)#heun_step(t, x, dt)
             
-            if first_step:
-                first_step=False
-                x = x + v*dt
+#             if first_step:
+#                 first_step=False
+#                 x = x + v*dt
             
-            else:
-                scaled_grad, mse_loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
-                                                is_grad_free=True, use_fd=False, grad_free={"a_t" : a_t, "b_t" : b_t, "x_gauss" : x_gauss},
-                                                **kwargs)
-                pbar.set_postfix({'distance': mse_loss}, refresh=False)
-                scaled_grad *=  torch.linalg.norm(v.flatten())
-                v = v - conditioning_scale*scaled_grad #beta
-                x = x + (v)*dt #
+#             else:
+#                 scaled_grad, mse_loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
+#                                                 is_grad_free=True, use_fd=False, grad_free={"a_t" : a_t, "b_t" : b_t, "x_gauss" : x_gauss},
+#                                                 **kwargs)
+#                 pbar.set_postfix({'distance': mse_loss}, refresh=False)
+#                 scaled_grad *=  torch.linalg.norm(v.flatten())
+#                 v = v - conditioning_scale*scaled_grad #beta
+#                 x = x + (v)*dt #
             
-            x = x.detach()
+#             x = x.detach()
                       
-        samples.append(x.cpu().numpy())
+#         samples.append(x.cpu().numpy())
         
-    return np.concatenate(samples)
+#     return np.concatenate(samples)
 
 # def oc_flow(f_p, cost_fn, meas_fn, measurement,
 #             max_iterations, lr,
@@ -613,3 +702,41 @@ def infer_gradfree_ho(fm : FlowMatcher, cfm_model : torch.nn.Module,
 #             if (i + 1) % control_update_freq == 0:  # Update control index
 #                 j += 1
 #     return x_prev.detach().cpu().numpy()
+
+# def d_flow_ssag_high_dim(
+#     cost_func,
+#     measurement_func,
+#     measurement,
+#     flow_model,
+#     initial_point,
+#     ode_solver=odeint,
+#     ode_solver_kwargs={"method": "midpoint", "t" : torch.linspace(0,1,2), "options": {"step_size": 1/6}},
+#     max_iterations=100,
+#     optimizer_kwargs={"line_search_fn": "strong_wolfe"},
+#     start_collect_phase=10,
+#     cov_rank=20,
+#     momt_coll_freq=4,
+#     collect_phase_optimizer = SGD,
+#     collect_phase_optimizer_kwargs = {"lr": 0.1, "momentum": 0.9},
+#     regularize=False,
+#     reg_scale=1e-2,
+#     parallel=False,
+#     **kwargs
+# ):
+#     """
+#     Implements a variant of the D-Flow algorithm with Stochastic Sample Averaging Gaussian for Higher Dimensional Data
+#     """
+    
+#     initial_point_close = d_flow(cost_func=cost_func, measurement_func=measurement_func, measurement=measurement, flow_model=flow_model,
+#                                  initial_point=initial_point, 
+#                                  optimizer_kwargs=optimizer_kwargs, max_iterations= start_collect_phase,
+#                                  ode_solver=ode_solver, ode_solver_kwargs=ode_solver_kwargs,
+#                                  full_output=False, regularize=regularize, reg_scale=reg_scale, pretrain=True, **kwargs)
+        
+#     return d_flow_ssag(cost_func=cost_func, measurement_func= measurement_func, measurement=measurement, flow_model=flow_model, 
+#                        initial_point= initial_point_close,
+#                        optimizer=collect_phase_optimizer,
+#                        ode_solver=ode_solver, ode_solver_kwargs=ode_solver_kwargs,                                          
+#                        optimizer_kwargs=collect_phase_optimizer_kwargs, collect_phase_optimizer_kwargs=collect_phase_optimizer_kwargs,
+#                        max_iterations=max_iterations - start_collect_phase, start_collect_phase=0, cov_rank=cov_rank, momt_coll_freq=momt_coll_freq,
+#                        regularize=regularize, reg_scale=reg_scale,parallel=parallel, **kwargs)

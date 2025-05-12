@@ -18,7 +18,7 @@ def get_grad_energy(x, model, retain_graph=False, create_graph=False):
     with th.enable_grad():
         x = x.requires_grad_(True)
         v = model(x)
-        return th.autograd.grad(v, x, grad_outputs=th.ones_like(v).to(v),retain_graph=retain_graph, create_graph=create_graph)[0]
+        return th.autograd.grad(v.sum(), x,retain_graph=retain_graph, create_graph=create_graph)[0] #grad_outputs=th.ones_like(v).to(v)
 
 def get_epsilon(t, t_switch, eps_max):
     return th.where(t < t_switch, th.zeros_like(t),
@@ -30,5 +30,17 @@ def langevin_step(x, model, t, t_switch, eps_max, dt, retain_graph=False, create
     grad_v = get_grad_energy(x, model, retain_graph=retain_graph, create_graph=create_graph)
     eps = get_epsilon(t, t_switch, eps_max)
     
-    x = x - dt * grad_v + th.sqrt(2 * dt * eps) * noise #.unsqueeze(-1)
+    x = x - dt * grad_v + th.sqrt(2 * dt * eps) * noise
     return x
+
+def log_q_dist(x1, x2, grad_x2, dt):
+    return (-0.25 * (1/dt) * ((x1 - x2 + dt*grad_x2)**2).flatten(start_dim=1).sum(dim=1)).unsqueeze(-1)
+
+def mala_condition(x, x_proposal, model, t, t_switch, eps_max, dt):
+    log_pi_x_proposal = - model(x_proposal) / eps_max
+    log_pi_x = - model(x) / eps_max
+    
+    log_q_x = log_q_dist(x, x_proposal, get_grad_energy(x_proposal, model), dt)
+    log_q_x_proposal = log_q_dist(x_proposal, x, get_grad_energy(x, model), dt)
+    
+    return th.exp(log_pi_x_proposal - log_pi_x + log_q_x - log_q_x_proposal)

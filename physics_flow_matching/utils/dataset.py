@@ -44,6 +44,18 @@ class VF_FM(Dataset):
         else:
             return self.data[index, 0], self.data[index, 1]
         
+class Joint(Dataset):
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
+        self.shape = data.shape[1:]
+    
+    def __len__(self):
+        return self.data.shape[0]
+    
+    def __getitem__(self, index):
+        return np.empty(self.shape, dtype=np.float32), self.data[index]
+    
 # class Wallpres(Dataset):
 #     def __init__(self, data, mean, std) -> None:
 #         super().__init__()
@@ -393,6 +405,7 @@ class WMAR_rollout(Dataset):
         return self.data[time_ind, pair_ind:pair_ind+1], self.data[time_ind, pair_ind+1:pair_ind+self.rolling_steps+1]
 
 DATASETS = {"WP":None,"KS":None, "WPWS":None, "WPWS_DD":None,
+            "Joint" : Joint,
             "VF_FM":VF_FM,
             "WMVF":None, "WMVF_M": None, "WMVF_P": WMVF_P,
             "WMVF_baseline":WMVF_baseline,

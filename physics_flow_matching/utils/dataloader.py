@@ -297,6 +297,29 @@ def get_loaders_wmvf_baseline(wm_paths, vf_paths, batch_size, time_cutoff, datas
     
 #     return train_dataloader, test_dataloader
 
+def get_joint_loaders(vf_paths, batch_size, dataset_):
+    
+    def norm(d, m, s):
+        return (d-m)/s
+    
+    data = []
+    
+    for uvw_path in vf_paths:
+        uvw_data = []    
+        for path in uvw_path:
+            d = np.load(path)
+            uvw_data.append(d)   
+        data.append(uvw_data)
+    data = [np.concatenate(uvw, axis=1) for uvw in data]
+    
+    data = np.concatenate(data, axis=1)
+    m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
+
+    data = norm(data, m, s)
+    train_dataloader = DataLoader(dataset_(data), batch_size=batch_size, shuffle=True)
+       
+    return train_dataloader
+
 def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True):
     
     def norm(d, m, s):

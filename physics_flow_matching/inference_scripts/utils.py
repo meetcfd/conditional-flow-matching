@@ -3,9 +3,13 @@ from torch.distributions.chi2 import Chi2
 from torch.nn.functional import interpolate
 
 def inpainting(x_hat, **kwargs):
+    # slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"]),
+    mask = kwargs["mask"]
+    return x_hat * mask ## x_hat[..., slice_x, slice_y] # both ways of conditioning works
+
+def inpainting2(x_hat, **kwargs):
     slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"]),
-    # mask = kwargs["mask"]
-    return x_hat[..., slice_x, slice_y]#x_hat * mask ## both ways of conditioning works
+    return x_hat[..., slice_x, slice_y]
 
 def partial_wall_pres_forward(x_hat, **kwargs):
     det_model = kwargs["model"]
@@ -73,6 +77,42 @@ def grad_cost_func_parallel(t, x, v, cfm_model, **kwargs): #meas_func, x, measur
             x_hat = x + (1 - t)*cfm_model(t, x)
             
         diff_norm =  cost_func_parallel(x_hat=x_hat, **kwargs) if "cost_func" not in kwargs.keys() else kwargs["cost_func"](x_hat=x_hat, **kwargs)
+        grad = torch.autograd.grad(diff_norm.sum(), x, create_graph=True)[0]
+    
+    grad_norm = torch.linalg.norm(grad.flatten(start_dim=1), dim=1)
+    v_norm = torch.linalg.norm(v.flatten(start_dim=1), dim=1)
+    for _ in range(grad.ndim - 1):
+        grad_norm = grad_norm[..., None]
+        v_norm = v_norm[..., None]
+        
+    unit_grad = v_norm * grad / grad_norm
+    
+    return -unit_grad
+
+def cost_func_parallel_MC(meas_func, x_proposals, measurement, **kwargs):
+    if measurement.ndim > 1:
+        return (((meas_func(x_proposals, **kwargs) -  measurement.unsqueeze(1))**2).mean(dim=1).flatten(start_dim=1)).mean(dim=1)
+    else:
+        return ((meas_func(x_proposals, **kwargs) -  measurement.unsqueeze(1))**2).mean(dim=1)
+    
+def cost_func_parallel_energy_MC(meas_func, x_proposals, measurement, **kwargs):
+    if measurement.ndim > 1:
+        return -(-(meas_func(x_proposals, **kwargs) -  measurement.unsqueeze(1))**2).exp().mean(dim=1).flatten(start_dim=1).mean(dim=1).log()
+    else:
+        return -(-(meas_func(x_proposals, **kwargs) -  measurement.unsqueeze(1))**2).exp().mean(dim=1).log()
+    
+def grad_cost_func_parallel_MC(t, x, v, cfm_model, **kwargs): #meas_func, x, measurement, cost_func=cost_func, **kwargs
+    with torch.enable_grad():
+        x.requires_grad_(True)
+        if kwargs["is_grad_free"]:
+            x_hat = x + (1 - t)*v
+                
+        else:
+            x_hat = x + (1 - t)*cfm_model(t, x)
+            
+        x_proposals = x_hat.unsqueeze(1) + kwargs["MC_noise_scale"] * torch.randn(x_hat.shape[0], kwargs["MC_num_of_props"], *x_hat.shape[1:]).to(x_hat)
+            
+        diff_norm =  cost_func_parallel_MC(x_proposals=x_proposals, **kwargs) if "cost_func" not in kwargs.keys() else kwargs["cost_func"](x_proposals=x_proposals, **kwargs)
         grad = torch.autograd.grad(diff_norm.sum(), x, create_graph=True)[0]
     
     grad_norm = torch.linalg.norm(grad.flatten(start_dim=1), dim=1)

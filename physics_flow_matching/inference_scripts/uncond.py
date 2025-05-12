@@ -5,7 +5,7 @@ from tqdm import tqdm
 from torchdiffeq import odeint
 from functools import partial
 from torch.distributions import Chi2
-from physics_flow_matching.utils.pre_procs_data import get_grad_energy, langevin_step
+from physics_flow_matching.utils.pre_procs_data import get_grad_energy, langevin_step, mala_condition
 
 def infer(dims_of_img, total_samples, samples_per_batch,
           use_odeint, cfm_model, t_start, t_end,
@@ -64,7 +64,7 @@ def infer(dims_of_img, total_samples, samples_per_batch,
     if len(samples_list) == 1:
         return samples_list[0]
     else:
-        if samples_list[0].ndim == 2:
+        if not all_traj:
             return np.concatenate(samples_list)
         else:
             return np.concatenate(samples_list, axis=1)       
@@ -117,7 +117,7 @@ def infer_em(dims_of_img, total_samples, samples_per_batch,
           use_odeint, em_model, t_start, t_end,
           scale, device, m=None, std=None, t_steps=2, use_heavy_noise=False, 
           y = None, y0_provided = False, y0= None, all_traj=False, 
-          use_langevin=False, t_switch=0.8, eps_max=0.15, dt=0.01, M=300, **kwargs):
+          use_langevin=False, mala_correction=False, t_switch=0.8, eps_max=0.15, dt=0.01, M=300, **kwargs):
     
     y0_ = y0.clone().detach() if y0_provided else None
     
@@ -141,7 +141,10 @@ def infer_em(dims_of_img, total_samples, samples_per_batch,
         def ode_solver(x):
             traj = [x]
             for i in range(0, M): # langevin MCMC steps
-                x = ode_solver_(x, t=(i)*dt*torch.ones(x.shape[0]).to(device).unsqueeze(-1))
+                t = i*dt*torch.ones(x.shape[0]).to(device).unsqueeze(-1)
+                x_prop = ode_solver_(x, t=t)
+                alpha = torch.ones_like(t) if not mala_correction else torch.min(torch.ones_like(t), mala_condition(x, x_prop, em_model, t, t_switch, eps_max, dt))
+                x = torch.where(torch.rand_like(t) <= alpha, x_prop, x) 
                 traj.append(x)
             return torch.stack(traj, dim=0)
     

@@ -5,16 +5,17 @@ import os
 
 import torch as th
 import numpy as np
-from physics_flow_matching.unet.mlp import EM_MLP_Wrapper as MLP
-from physics_flow_matching.unet.mlp import ACTS
+from physics_flow_matching.unet.unet import UNetModelWrapper as UNetModel
 from torch.utils.data import DataLoader
-from physics_flow_matching.multi_fidelity.synthetic.dataset import flow_guidance_dists
-from physics_flow_matching.utils.train_em import train_model
+# from physics_flow_matching.multi_fidelity.synthetic.dataset import flow_guidance_dists
+from physics_flow_matching.multi_fidelity.synthetic.dataset import Syn_Data_FM
+from physics_flow_matching.utils.train_mnist import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
-from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
+from torchcfm.conditional_flow_matching import FlowMatcher
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.tensorboard import SummaryWriter
+from torchvision import datasets, transforms
 
 def create_dir(path, config):
     if not os.path.exists(path):
@@ -40,25 +41,25 @@ def main(config_path):
     
     writer = SummaryWriter(log_dir=logpath)
     
-    dataset = flow_guidance_dists(dist_name1=config.dataset.dist_name1,
-                                  dist_name2=config.dataset.dist_name2, n=config.dataset.n, seed=config.dataset.seed)
+    transform = transforms.Compose([transforms.ToTensor(),
+                              transforms.Normalize((0.5,), (0.5,))])
+
+    # Download and load the training data
+    dataset = datasets.MNIST(root='/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/multi_fidelity/synthetic/data', train=True, download=True, transform=transform)
     
     train_dataloader = DataLoader(dataset, batch_size=config.dataloader.batch_size, shuffle=True)
         
-    model = MLP(input_dim=config.mlp.input_dim,
-                hidden_dims=config.mlp.hidden_dims,
-                output_dim=config.mlp.output_dim,
-                act1=ACTS[config.mlp.act1] if hasattr(config.mlp, 'act1') else ACTS['relu'],
-                act2=ACTS[config.mlp.act2] if hasattr(config.mlp, 'act2') else None
-                )
+    model = UNetModel(dim=config.unet.dim, num_channels=config.unet.num_channels, num_res_blocks=config.unet.num_res_blocks)
 
     model.to(dev)
     
-    FM = ExactOptimalTransportConditionalFlowMatcher(sigma=config.FM.sigma)
+    FM = FlowMatcher(sigma=config.FM.sigma,
+                     add_heavy_noise=config.FM.add_heavy_noise if hasattr(config.FM, 'add_heavy_noise') else False,
+                      nu=config.FM.nu if hasattr(config.FM, 'nu') else th.inf)
     
     optim = Adam(model.parameters(), lr=config.optimizer.lr)
     
-    sched = None
+    sched = None#CosineAnnealingLR(optim, config.scheduler.T_max, config.scheduler.eta_min)
     
     loss_fn = DD_loss
     
@@ -78,15 +79,7 @@ def main(config_path):
                 restart=config.restart,
                 return_noise=config.FM.return_noise,
                 restart_epoch=config.restart_epoch,
-                class_cond=config.mlp.class_cond if hasattr(config.mlp, 'class_cond') else False,
-                contrastive_obj=config.contrastive.contrastive_obj if hasattr(config.contrastive, 'contrastive_obj') else False,
-                mala_correction=config.contrastive.mala_correction if hasattr(config.contrastive, 'mala_correction') else False,
-                M_lang=config.contrastive.M_lang if hasattr(config.contrastive, 'M_lang') else None,
-                eps_max=config.contrastive.eps_max if hasattr(config.contrastive, 'eps_max') else None,
-                t_switch=config.contrastive.t_switch if hasattr(config.contrastive, 't_switch') else None,
-                dt=config.contrastive.dt if hasattr(config.contrastive, 'dt') else None,
-                weight_cd=config.contrastive.weight_cd if hasattr(config.contrastive, 'weight_cd') else 0
-                )
+                class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False)
 
 if __name__ == '__main__':
     main(sys.argv[1])

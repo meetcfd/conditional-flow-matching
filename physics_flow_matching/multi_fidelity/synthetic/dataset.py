@@ -4,36 +4,51 @@ import numpy as np
 from physics_flow_matching.multi_fidelity.synthetic.dists.base import get_distribution
 
 class Syn_Data_FM(Dataset):
-    def __init__(self, data_params, n, seed=42):
+    
+    def __init__(self, data_params, n, base_data_params=None, seed=42):
         super().__init__()
         np.random.seed(seed)
+        self.n = n
 
+        if base_data_params is not None:
+            self.data1 = self._init_dist(base_data_params)
+        else:
+            self.data1 = None
+        
+        self.data = self._init_dist(data_params)
+
+   
+    def _init_dist(self, data_params):
         l1, l2, s1, s2, p1, p2 = data_params
         probs = np.array([p1, p2])
-        means = np.array([l1, l2])
-        scales = np.array([s1, s2]) # Standard deviations
-
+        
         if not np.isclose(probs.sum(), 1.0):
              raise ValueError(f"Probabilities must sum to 1. Got: {probs.tolist()}, Sum: {probs.sum()}")
 
-        self.n = n
+        means = np.array([l1, l2])
+        scales = np.array([s1, s2]) # Standard deviations
+        
         n_components = len(means)
 
-        component_choices = np.random.choice(n_components, size=n, p=probs)
+        component_choices = np.random.choice(n_components, size=self.n, p=probs)
 
         chosen_means = means[component_choices]
         chosen_scales = scales[component_choices]
 
-        samples = np.random.normal(loc=chosen_means, scale=chosen_scales, size=n)
+        samples = np.random.normal(loc=chosen_means, scale=chosen_scales, size=self.n)
 
-        self.data = torch.from_numpy(samples[..., np.newaxis]).float()
+        return torch.from_numpy(samples[..., np.newaxis]).float()
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, index):
         v = self.data[index]
-        return torch.empty_like(v), v
+        if self.data1 is not None:
+            v1 = self.data1[index]
+        else:
+            v1 = torch.empty_like(v)
+        return v1, v
 
 class Syn_Data_FM_multi(Dataset):
     def __init__(self, mus, covs, pis, n, seed=42):
@@ -120,4 +135,4 @@ class flow_guidance_dists(Dataset):
     
     def __getitem__(self, index):
         v1, v2  = self.data1[index], self.data2[index]
-        return v1, v2
+        return v1, v2 
