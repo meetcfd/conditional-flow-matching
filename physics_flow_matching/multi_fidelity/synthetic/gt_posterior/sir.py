@@ -3,7 +3,7 @@ import torch as th
 from torch.distributions import Exponential, Normal
 
 def log_likelihood_pdf(theta, forward_func):
-    dist = Normal(0, 1)#Exponential(rate=1.0)
+    dist = Normal(1.5, 1e-1)#Exponential(rate=1.0)
     return dist.log_prob(forward_func(theta))
 
 def likelihood_pdf(theta, forward_func):

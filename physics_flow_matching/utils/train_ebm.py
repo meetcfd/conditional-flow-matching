@@ -1,7 +1,9 @@
 import torch as th
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
-from physics_flow_matching.utils.pre_procs_data import get_batch
+from torch.nn.utils import clip_grad_norm_
+from physics_flow_matching.utils.pre_procs_data import get_batch, get_grad_energy, langevin_step, mala_condition
+import numpy as np
 
 def restart_func(restart_epoch, path, model, optimizer, sched=None):
     assert restart_epoch != None, "restart epoch not initialized!"
@@ -22,15 +24,23 @@ def restart_func(restart_epoch, path, model, optimizer, sched=None):
     return start_epoch, model, optimizer, sched
 
 
-def train_model(model: nn.Module, FM, train_dataloader,
-                optimizer: optim.Optimizer, sched: optim.Optimizer|None, loss_fn, writer : SummaryWriter,
+def train_model(model: nn.Module, train_dataloader,
+                optimizer: optim.Optimizer, sched: optim.Optimizer|None, 
+                writer : SummaryWriter,
                 num_epochs, print_epoch_int,
                 save_epoch_int, print_within_epoch_int, path,
                 device,
-                return_noise=False,
+                M_lang = 200,
+                eps_max = 1e-2,
+                t_switch = 0.9,
+                dt = 1e-2,
+                weight_alpha=1e-2,
                 class_cond=False,
-                restart=False, restart_epoch=None,
-                is_base_gaussian=False):
+                restart=False,
+                mala_correction=False,
+                clip_grad = False,
+                clip_val = 1e-2, 
+                restart_epoch=None):
     
     if restart:
         start_epoch, model, optimizer, sched = restart_func(restart_epoch, path, model, optimizer, sched)
@@ -45,20 +55,29 @@ def train_model(model: nn.Module, FM, train_dataloader,
         
         for iteration, info in enumerate(train_dataloader):
             if not class_cond:
-                x0, x1 = info
+                x1, _ = info
             else:
-                x0, x1, y = info
-            if is_base_gaussian:
-                x0 = th.randn_like(x0)
-            if return_noise:
-                t, xt, ut, noise = get_batch(FM, x0.to(device), x1.to(device), return_noise=return_noise)
-            else: 
-                t, xt, ut = get_batch(FM, x0.to(device), x1.to(device))
+                x1, y = info
 
-            ut_pred = model(t, xt, y=y.to(device) if class_cond else None)
-            loss = loss_fn(ut_pred, ut)
+            with th.no_grad():
+                t_neg = th.from_numpy(np.random.choice(2, x1.shape[0])).float().to(device)
+                x_neg = th.randn_like(x1.to(device))
+                x_neg[t_neg == 1] = (x1.to(device))[t_neg == 1]
+                for _ in range(M_lang):
+                    x_neg_proposal = langevin_step(x_neg, model, t_neg, t_switch, eps_max, dt, x1.ndim - 1)
+                    alpha = th.ones_like(t_neg) if not mala_correction else th.min(th.ones_like(t_neg), mala_condition(x_neg, x_neg_proposal, model, t_neg, t_switch, eps_max, dt))
+                    accept_prop = th.rand_like(t_neg) <= alpha
+                    x_neg[accept_prop] = x_neg_proposal[accept_prop]
+                    t_neg = t_neg + dt
+            l_neg = model(x_neg).mean()
+            l_pos = model(x1.to(device)).mean()
+            l_cd = l_pos - l_neg
+            
+            loss = l_cd  +  weight_alpha * th.mean(l_pos**2 + l_neg**2)
             optimizer.zero_grad()
-            loss.backward()       
+            loss.backward()
+            if clip_grad:
+               clip_grad_norm_(model.parameters(), clip_val)        
             optimizer.step()      
             iter_val += 1
             epoch_loss += loss.item()

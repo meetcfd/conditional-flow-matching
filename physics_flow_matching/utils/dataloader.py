@@ -320,7 +320,7 @@ def get_joint_loaders(vf_paths, batch_size, dataset_):
        
     return train_dataloader
 
-def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True):
+def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True, spatial_cutoff=None):
     
     def norm(d, m, s):
         return (d-m)/s
@@ -340,6 +340,7 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True):
             d = np.load(path)
             data.append(d)
         data = np.concatenate(data, axis=1)
+        data = data[:, :, :spatial_cutoff] if spatial_cutoff is not None else data
         m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
 
     else:
@@ -351,6 +352,7 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True):
             data.append(uvw_data)
         data = [np.concatenate(uvw, axis=1) for uvw in data]
         data = np.stack(data, axis=1)
+        data = data[:, :, :, :spatial_cutoff] if spatial_cutoff is not None else data
         m, s = np.mean(data, axis=(0,3,4), keepdims=True), np.std(data, axis=(0,3,4), keepdims=True)
     
     data = norm(data, m, s)

@@ -170,14 +170,17 @@ def d_flow(
     
     pbar = tqdm(list(range(max_iterations)))
 
-    for _ in pbar:
+    # loss = torch.tensor(1e3)
+    # loss_prev = torch.tensor(1e6)
+    for _ in pbar: #while (loss).item()/initial_point.shape[0] > 1e-3  and (loss - loss_prev).abs().item()/loss_prev.item() > 1e-3:
+    #    loss_prev = loss.clone()
        loss = optimizer.step(closure)
-       pbar.set_postfix({'distance': loss.item()}, refresh=False)
+       pbar.set_postfix({'distance': loss.item()}, refresh=False) #print("distance:", loss.item())#
 
     if not pretrain:
         return (ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1] if not full_output else ode_solver(flow_model, initial_point, **ode_solver_kwargs)).detach().cpu().numpy()
     else: 
-        return initial_point.detach()
+        return initial_point.detach().cpu()
 
 def d_flow_sgld(
     cost_func,
@@ -197,8 +200,9 @@ def d_flow_sgld(
     reg_scale=1e-2,
     parallel=False,
     rms_prop_precond = False,
-    beta = 0.9,
-    delta = 1e-8,
+    beta = 0.99,
+    delta = 1e-5,
+    consider_loss_together=True,
     **kwargs
 ):
     """
@@ -222,6 +226,7 @@ def d_flow_sgld(
     
     # dims = initial_point.dim() -1
     pbar = tqdm(list(range(max_iterations)))
+    collect = []#[initial_point.clone().cpu()]
     
     first_momt = torch.zeros(initial_point.numel(), device=initial_point.device) if not parallel else torch.zeros_like(initial_point.view(initial_point.shape[0], -1), device=initial_point.device).requires_grad_(False)
     second_momt = torch.zeros(initial_point.numel(), device=initial_point.device) if not parallel else first_momt.clone().requires_grad_(False)
@@ -249,25 +254,31 @@ def d_flow_sgld(
                 generated_sample = ode_solver(flow_model, initial_point, **ode_solver_kwargs)[-1]
                 loss = cost_func(measurement_func, generated_sample, measurement, **kwargs)
                 
-                if regularize:
-                    loss = loss + reg_scale*reg2(initial_point)
-                    
-                grad_init_point = torch.autograd.grad(loss if not parallel else loss.sum(), initial_point)[0]
+                if consider_loss_together:
+                    if regularize:
+                        loss = loss + reg_scale*reg2(initial_point)
+                        
+                    grad_init_point = torch.autograd.grad(loss if not parallel else loss.sum(), initial_point)[0]
+                else:
+                    grad_init_point = torch.autograd.grad(loss if not parallel else loss.sum(), initial_point)[0]
+                    grad_init_point_prior = torch.autograd.grad(reg_scale*reg2(initial_point).sum(), initial_point)[0] if regularize else None
            
             if not rms_prop_precond:
                 initial_point = initial_point - step_size[epoch] * grad_init_point + torch.sqrt(2 * step_size[epoch] * noise_step) * torch.randn_like(initial_point)
             else:
                 V = beta * V + (1 - beta) * grad_init_point**2
-                G = 1/(torch.sqrt(V) + delta)
+                G = 1/(torch.sqrt(V) + delta[epoch])
+                if not consider_loss_together and grad_init_point_prior is not None:
+                    grad_init_point = grad_init_point + grad_init_point_prior
                 initial_point = initial_point - step_size[epoch] * G * grad_init_point + torch.sqrt(2 * step_size[epoch] * G * noise_step) * torch.randn_like(initial_point)
                 
             pbar.set_postfix({'distance': loss.item() if not parallel else loss.sum().item()}, refresh=False)
-            
-            if epoch >= start_collect_phase:                
+            if epoch >= start_collect_phase:
+                collect.append(initial_point.detach().cpu())               
                 first_momt, second_momt, num_collected, dev_matrix = ssag_collect(initial_point, first_momt, second_momt, epoch,
                                                                                 momt_coll_freq, num_collected, dev_matrix, parallel)
             
-    return first_momt, second_momt, dev_matrix, num_collected
+    return first_momt, second_momt, dev_matrix, num_collected, collect
 
 def d_flow_ssag(
     cost_func,
@@ -507,7 +518,42 @@ def infer_parallel(cfm_model : torch.nn.Module,
 
         samples.append(traj[-1].cpu().numpy() if not all_traj else traj.cpu().numpy())
                 
-    return np.concatenate(samples)  if not all_traj else np.concatenate(samples, axis=1) 
+    return np.concatenate(samples)  if not all_traj else np.concatenate(samples, axis=1)
+
+def flow_dps(fm : FlowMatcher, cfm_model : torch.nn.Module,
+             samples_per_batch, total_samples, dims_of_img, 
+             num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+             device, refine, sample_noise, use_heavy_noise, rf_start, start_provided=False, start_point=None, **kwargs):
+    
+    """https://arxiv.org/pdf/2503.08136"""
+    
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
+    dt = ts[1] - ts[0]
+    
+    samples_per_batch = 1
+    
+    samples = []
+    
+    for i in range(total_samples//samples_per_batch):
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img 
+        
+        if kwargs["swag"]:
+            kwargs["model"].sample()
+    
+    x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point#torch.randn(samples_size, device=device)
+    conditioning_per_batch = conditioning #conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
+    pbar = tqdm(ts[:-1])       
+    for t in pbar:
+        x = x.requires_grad_()
+        v = cfm_model(t, x)
+        
+        scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
+                                           grad={"t" : t, "v" : v},
+                                           **kwargs)
 
 # def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
 #                    samples_per_batch, total_samples, dims_of_img, 
