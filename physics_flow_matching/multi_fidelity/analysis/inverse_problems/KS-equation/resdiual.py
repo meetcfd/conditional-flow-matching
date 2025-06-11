@@ -1,4 +1,5 @@
 import numpy as np
+import scipy
 
 def calculate_kuramoto_sivashinsky_residual(u_solution, dt, dx):
     """
@@ -78,3 +79,18 @@ def calculate_kuramoto_sivashinsky_residual(u_solution, dt, dx):
     residual = u_t + u_center * u_x + u_xx + u_xxxx
 
     return np.abs(residual).reshape(residual.shape[0], -1).mean(axis=-1)
+
+def two_point_corr(data, x, ens,axis):
+    """
+    data = [nx, ny]
+    axis= 0
+    ens = 1
+
+    """
+    r = np.diff(x).mean()
+    f, tke = scipy.signal.welch(data, fs=1/r, nperseg=256,scaling='spectrum', axis=axis, return_onesided=False)
+    R = np.fft.ifft(tke,axis=axis).real
+    Rtotal = R.mean(axis=ens)
+    R_half = Rtotal[:Rtotal.shape[0]//2]
+    distance = np.arange(R_half.shape[0])*r
+    return distance, R_half/R_half[0] 

@@ -42,7 +42,9 @@ def main(config_path):
     train_dataloader = get_loaders_vf_fm(vf_paths=config.dataloader.datapath,
                                         batch_size=config.dataloader.batch_size,
                                         dataset_=DATASETS[config.dataloader.dataset],
-                                        jump=config.dataloader.jump)
+                                        jump=config.dataloader.jump,
+                                        spatial_cutoff=config.dataloader.spatial_cutoff if hasattr(config.dataloader, 'spatial_cutoff') else None,
+                                        patch_dims=config.dataloader.patch_dims if hasattr(config.dataloader, 'patch_dims') else None)
         
     model = UNetModel(dim=config.unet.dim,
                       channel_mult=config.unet.channel_mult,

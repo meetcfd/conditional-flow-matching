@@ -10,7 +10,7 @@ from physics_flow_matching.utils.dataloader import get_loaders_vf_fm
 from physics_flow_matching.utils.dataset import DATASETS
 from physics_flow_matching.utils.train import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
-from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
+from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.tensorboard import SummaryWriter
@@ -60,7 +60,7 @@ def main(config_path):
 
     model.to(dev)
     
-    FM = ConditionalFlowMatcher(sigma=config.FM.sigma)
+    FM = ExactOptimalTransportConditionalFlowMatcher(sigma=config.FM.sigma)
     
     optim = Adam(model.parameters(), lr=config.optimizer.lr)
     
@@ -84,7 +84,8 @@ def main(config_path):
                 restart=config.restart,
                 return_noise=config.FM.return_noise,
                 restart_epoch=config.restart_epoch,
-                class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False)
+                class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False,
+                is_base_gaussian=config.FM.is_base_gaussian if hasattr(config.FM, 'is_base_gaussian') else False)
 
 if __name__ == '__main__':
     main(sys.argv[1])

@@ -44,6 +44,22 @@ class VF_FM(Dataset):
         else:
             return self.data[index, 0], self.data[index, 1]
         
+class VF_FM_patchify(VF_FM):
+    def __init__(self, data, all_vel, patch_dims):
+       super().__init__(data, all_vel)
+       self.patch_dims = patch_dims
+       self.space_ress = self.data.shape[-2:]
+               
+    def __getitem__(self, index):
+        start_indices = [np.random.randint(0,space_res-patch_dim) if space_res > patch_dim else 0 for space_res, patch_dim in zip(self.space_ress, self.patch_dims)]
+        patch_x, patch_y = (slice(start_index, start_index+patch_dim) for start_index, patch_dim in zip(start_indices,self.patch_dims))
+        if not self.one_yp and not self.wm_vf:
+            x0, x1, y = super().__getitem__(index)
+            return x0[..., patch_x, patch_y], x1[..., patch_x, patch_y], y
+        else:
+            x0, x1 = super().__getitem__(index)
+            return x0[..., patch_x, patch_y], x1[..., patch_x, patch_y]
+    
 class Joint(Dataset):
     def __init__(self, data):
         super().__init__()
@@ -407,6 +423,7 @@ class WMAR_rollout(Dataset):
 DATASETS = {"WP":None,"KS":None, "WPWS":None, "WPWS_DD":None,
             "Joint" : Joint,
             "VF_FM":VF_FM,
+            "VF_FM_patchify":VF_FM_patchify,
             "WMVF":None, "WMVF_M": None, "WMVF_P": WMVF_P,
             "WMVF_baseline":WMVF_baseline,
             "WSVF":None,

@@ -7,8 +7,8 @@ import torch as th
 import numpy as np
 from physics_flow_matching.unet.mlp import MLP_Wrapper as MLP
 from torch.utils.data import DataLoader
-# from physics_flow_matching.multi_fidelity.synthetic.dataset import flow_guidance_dists
-from physics_flow_matching.multi_fidelity.synthetic.dataset import Syn_Data_FM
+from physics_flow_matching.multi_fidelity.synthetic.dataset import flow_guidance_dists
+# from physics_flow_matching.multi_fidelity.synthetic.dataset import Syn_Data_FM
 from physics_flow_matching.utils.train import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
 from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
@@ -40,12 +40,14 @@ def main(config_path):
     
     writer = SummaryWriter(log_dir=logpath)
     
-    dataset = Syn_Data_FM(data_params=config.dataset.data_params, n=config.dataset.n, 
-                          base_data_params=config.dataset.base_data_params if hasattr(config.dataset, "base_data_params") else None,
-                          seed=config.dataset.seed)
+    dataset =  flow_guidance_dists(dist_name1=config.dataset.dist_name1,
+                                   dist_name2=config.dataset.dist_name2, n=config.dataset.n,
+                                   seed=config.dataset.seed, 
+                                   normalize=config.dataset.normalize if hasattr(config.dataset, 'normalize') else False)
     
-    #flow_guidance_dists(dist_name1=config.dataset.dist_name1,
-                                  #dist_name2=config.dataset.dist_name2, n=config.dataset.n, seed=config.dataset.seed)
+    #Syn_Data_FM(data_params=config.dataset.data_params, n=config.dataset.n, 
+                        #   base_data_params=config.dataset.base_data_params if hasattr(config.dataset, "base_data_params") else None,
+                        #   seed=config.dataset.seed)
     #Syn_Data_FM_multi_to_multi(mus1=config.dataset.mus1, covs1=config.dataset.covs1, pis1=config.dataset.pis1,
     #                                     mus2=config.dataset.mus2, covs2=config.dataset.covs2, pis2=config.dataset.pis2,
     #                                     n=config.dataset.n, seed=config.dataset.seed)

@@ -5,13 +5,12 @@ import os
 
 import torch as th
 import numpy as np
-from physics_flow_matching.unet.unet import UNetModelWrapper as UNetModel
+from physics_flow_matching.unet.ebm_net import EBM_Wrapper as EBM
 from torch.utils.data import DataLoader
 # from physics_flow_matching.multi_fidelity.synthetic.dataset import flow_guidance_dists
 from physics_flow_matching.multi_fidelity.synthetic.dataset import Syn_Data_FM
-from physics_flow_matching.utils.train_mnist import train_model
+from physics_flow_matching.utils.train_ebm import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
-from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher #FlowMatcher
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.tensorboard import SummaryWriter
@@ -49,28 +48,22 @@ def main(config_path):
     
     train_dataloader = DataLoader(dataset, batch_size=config.dataloader.batch_size, shuffle=True)
         
-    model = UNetModel(dim=config.unet.dim, num_channels=config.unet.num_channels, num_res_blocks=config.unet.num_res_blocks)
-
-    model.to(dev)
-
-    FM = ExactOptimalTransportConditionalFlowMatcher(sigma=config.FM.sigma)
+    model = EBM(
+                cnn_add_max_pool_layer=config.net.cnn_add_max_pool_layer,
+                cnn_channel_list=config.net.cnn_channel_list,
+                mlp_feature_list=config.net.mlp_feature_list
+               )
     
-    # FM = FlowMatcher(sigma=config.FM.sigma,
-    #                  add_heavy_noise=config.FM.add_heavy_noise if hasattr(config.FM, 'add_heavy_noise') else False,
-    #                   nu=config.FM.nu if hasattr(config.FM, 'nu') else th.inf)
+    model.to(dev)
     
     optim = Adam(model.parameters(), lr=config.optimizer.lr)
     
     sched = None#CosineAnnealingLR(optim, config.scheduler.T_max, config.scheduler.eta_min)
-    
-    loss_fn = DD_loss
-    
+        
     train_model(model=model,
-                FM=FM,
                 train_dataloader=train_dataloader,
                 optimizer=optim,
                 sched=sched,
-                loss_fn=loss_fn,
                 writer=writer,
                 num_epochs=config.num_epochs,
                 print_epoch_int=config.print_epoch_int,
@@ -78,10 +71,17 @@ def main(config_path):
                 print_within_epoch_int=config.print_with_epoch_int,
                 path=savepath,
                 device=dev,
+                mala_correction=config.contrastive.mala_correction if hasattr(config.contrastive, 'mala_correction') else False,
+                M_lang=config.contrastive.M_lang if hasattr(config.contrastive, 'M_lang') else 200,
+                eps_max=config.contrastive.eps_max if hasattr(config.contrastive, 'eps_max') else 1e-2,
+                t_switch=config.contrastive.t_switch if hasattr(config.contrastive, 't_switch') else 0.,
+                weight_alpha= config.contrastive.weight_alpha if hasattr(config.contrastive, 'weight_alpha') else 1e-2,
+                clip_grad= config.contrastive.clip_grad  if hasattr(config.contrastive, 'clip_grad') else False,
+                clip_val= config.contrastive.clip_val  if hasattr(config.contrastive, 'clip_val') else 1e-2,
+                dt=config.contrastive.dt if hasattr(config.contrastive, 'dt') else 1e-2,
                 restart=config.restart,
-                return_noise=config.FM.return_noise,
                 restart_epoch=config.restart_epoch,
-                class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False)
+                class_cond=config.net.class_cond if hasattr(config.net, 'class_cond') else False)
 
 if __name__ == '__main__':
     main(sys.argv[1])
