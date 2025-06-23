@@ -520,6 +520,64 @@ def infer_parallel(cfm_model : torch.nn.Module,
                 
     return np.concatenate(samples)  if not all_traj else np.concatenate(samples, axis=1)
 
+def infer_grad_generalized(fm : FlowMatcher, cfm_model : torch.nn.Module,
+                samples_per_batch, total_samples, dims_of_img, 
+                num_of_steps, grad_cost_func, meas_func_list, conditioning_list, conditioning_scale_list,
+                device, sample_noise, use_heavy_noise, rf_start, start_provided=False, start_point=None, **kwargs):
+    """https://arxiv.org/pdf/2411.07625 : grad based algorithm"""
+    
+    # torch.manual_seed(seed=42)
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
+    dt = ts[1] - ts[0]
+    
+    samples_per_batch = 1
+    
+    samples = []
+    
+    for i in range(total_samples//samples_per_batch):
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img 
+        
+        if kwargs["swag"]:
+            kwargs["model"].sample()
+
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point
+        conditioning_per_batch_list = [conditioning[i*samples_per_batch:(i+1)*samples_per_batch] for conditioning in conditioning_list]
+        pbar = tqdm(ts[:-1])        
+        for t in pbar:
+            _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
+            beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
+                             pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
+             
+            x_fixed = x.clone().detach()
+                           
+            x = x.requires_grad_()
+            v = cfm_model(t, x)
+            
+            scaled_grad_list, loss_list = grad_cost_func(meas_func_list, x, conditioning_per_batch_list, 
+                                            is_grad_free=False, grad={"t" : t, "v" : v},
+                                            **kwargs)
+            
+            total_grad = 0.
+            total_loss = 0.
+            v_norm = torch.linalg.norm(v.flatten())
+            for scaled_grad, loss, conditioning_scale in zip(scaled_grad_list, loss_list, conditioning_scale_list):
+                scaled_grad *= v_norm
+                total_grad += conditioning_scale*scaled_grad
+                total_loss += loss
+            pbar.set_postfix({'distance': total_loss}, refresh=False)
+            v = v - total_grad
+            x = x_fixed + v*dt #x + (v)*dt 
+            
+            x = x.detach()
+        
+        samples.append(x.cpu().numpy())
+        
+    return np.concatenate(samples)
+
 def flow_dps(fm : FlowMatcher, cfm_model : torch.nn.Module,
              samples_per_batch, total_samples, dims_of_img, 
              num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,

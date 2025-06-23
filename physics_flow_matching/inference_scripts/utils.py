@@ -78,6 +78,34 @@ def grad_cost_func(meas_func, x, measurement, cost_func=cost_func, **kwargs):
     grad = torch.autograd.grad(diff_norm, x)[0]
     unit_grad = grad / torch.linalg.norm(grad)
     return unit_grad, diff_norm.item() #torch.autograd.grad(diff_norm, x)[0], diff_norm.item() #
+
+def grad_cost_func_generalized(meas_func_list, x, measurement_list, cost_func=cost_func, **kwargs):
+    
+    if kwargs["is_grad_free"]:
+        
+        if kwargs["use_fd"]:
+            assert "x_prev" in kwargs["grad_free"].keys() and "dt" in kwargs["grad_free"].keys(), "previous step is not cached!"
+            x_prev, dt, t = kwargs["grad_free"]["x_prev"], kwargs["grad_free"]["dt"],  kwargs["grad_free"]["t"]
+            v_fd = (x - x_prev)/dt
+            x_hat = x + (1 - t)*v_fd
+        else:
+            a_t, b_t, x_gauss = kwargs["grad_free"]["a_t"], kwargs["grad_free"]["b_t"], kwargs["grad_free"]["x_gauss"]
+            x_hat = 1/a_t * (x - b_t * x_gauss)
+    else:
+        t, v = kwargs["grad"]["t"], kwargs["grad"]["v"]
+        x_hat = x + (1 - t)*v
+    
+    unit_grad_list, diff_norm_list = [], []
+    for lst_count, (measurement, meas_func) in enumerate(zip(measurement_list, meas_func_list)):
+        if lst_count != len(measurement_list) - 1:
+            retain_graph = True
+        else:
+            retain_graph = False
+        diff_norm =  cost_func(meas_func, x_hat, measurement, **kwargs) if "cost_func" not in kwargs.keys() else kwargs["cost_func"](meas_func, x_hat, measurement, **kwargs)
+        grad = torch.autograd.grad(diff_norm, x, retain_graph=retain_graph)[0]
+        unit_grad_list.append(grad / torch.linalg.norm(grad))
+        diff_norm_list.append(diff_norm.item())
+    return unit_grad_list, diff_norm_list
     
 def grad_cost_func_parallel(t, x, v, cfm_model, **kwargs): #meas_func, x, measurement, cost_func=cost_func, **kwargs
     with torch.enable_grad():
