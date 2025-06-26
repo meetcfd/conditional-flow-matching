@@ -121,11 +121,12 @@ class Syn_Data_FM_multi_to_multi(Dataset):
         return v1, v2
     
 class flow_guidance_dists(Dataset):
-    def __init__(self, dist_name1: str, dist_name2: str, n: int, seed: int = 42, normalize : bool = False):
+    def __init__(self, dist_name1: str, dist_name2: str, n: int, seed: int = 42, normalize : bool = False, contrastive=False):
         super().__init__()
         self.dist1 = get_distribution(dist_name1)
         self.dist2 = get_distribution(dist_name2)
         self.n = n
+        self.contrastive = contrastive
         np.random.seed(seed)
         self.data1 = self.dist1.sample(n, device='cpu')
         self.data2 = self.dist2.sample(n, device='cpu')
@@ -138,4 +139,10 @@ class flow_guidance_dists(Dataset):
     
     def __getitem__(self, index):
         v1, v2  = self.data1[index], self.data2[index]
+        if self.contrastive:
+            random_index = np.random.randint(0, self.n)
+            while index == random_index:
+                random_index = np.random.randint(0, self.n)
+            v1_cont, v2_cont = self.data1[random_index], self.data2[random_index]
+            return v1, v2, v1_cont, v2_cont
         return v1, v2 
