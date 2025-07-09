@@ -2,11 +2,12 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from functools import partial
-from torchcfm.conditional_flow_matching import FlowMatcher, pad_t_like_x
+from torchcfm.conditional_flow_matching import FlowMatcher, pad_t_like_x, ExactOptimalTransportConditionalFlowMatcher
 from torchdiffeq import odeint
 from torchdyn.core import NeuralODE
 from torch.optim import LBFGS, SGD
 from physics_flow_matching.inference_scripts.utils import ssag_collect
+from typing import Union
 
 def flowgrad(v_theta, cost_func, meas_func, measurement,
              device, num_of_samples, size,
@@ -275,8 +276,8 @@ def d_flow_sgld(
             pbar.set_postfix({'distance': loss.item() if not parallel else loss.sum().item()}, refresh=False)
             if epoch >= start_collect_phase:
                 collect.append(initial_point.detach().cpu())               
-                first_momt, second_momt, num_collected, dev_matrix = ssag_collect(initial_point, first_momt, second_momt, epoch,
-                                                                                momt_coll_freq, num_collected, dev_matrix, parallel)
+                # first_momt, second_momt, num_collected, dev_matrix = ssag_collect(initial_point, first_momt, second_momt, epoch,
+                                                                                # momt_coll_freq, num_collected, dev_matrix, parallel)
             
     return first_momt, second_momt, dev_matrix, num_collected, collect
 
@@ -387,7 +388,7 @@ def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
             kwargs["model"].sample()
 
         x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point#torch.randn(samples_size, device=device)
-        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch] #conditioning
+        conditioning_per_batch = conditioning #conditioning[i*samples_per_batch:(i+1)*samples_per_batch] #
         pbar = tqdm(ts[:-1])        
         for t in pbar:
             _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
@@ -585,8 +586,17 @@ def flow_dps(fm : FlowMatcher, cfm_model : torch.nn.Module,
     
     """https://arxiv.org/pdf/2503.08136"""
     
-    start = 5e-3 if rf_start else 0 
-    ts = torch.linspace(start, 1, num_of_steps, device=device)
+    pass
+
+def flow_daps(fm : Union[FlowMatcher, ExactOptimalTransportConditionalFlowMatcher], cfm_model : torch.nn.Module,
+              samples_per_batch, total_samples, dims_of_img,
+              num_of_steps, meas_func, conditioning, beta,
+              eta, r, langevin_mc_steps,
+              device, sample_noise, use_heavy_noise, 
+              start_provided=False, start_point=None, **kwargs):
+
+    # torch.manual_seed(seed=42)
+    ts = torch.linspace(0, 1, num_of_steps, device=device)
     dt = ts[1] - ts[0]
     
     samples_per_batch = 1
@@ -598,20 +608,37 @@ def flow_dps(fm : FlowMatcher, cfm_model : torch.nn.Module,
         if i == total_samples//samples_per_batch - 1:
             samples_size = samples_per_batch + total_samples%samples_per_batch
         samples_size = (samples_size,) + dims_of_img 
+
+        x0_lang_up = None
+        eps_hat = None       
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point
+        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
         
-        if kwargs["swag"]:
-            kwargs["model"].sample()
+        pbar = tqdm(ts[:-1])
+        for i, t in enumerate(pbar):
+            if i != 0:
+                x = fm.sample_xt(eps_hat, x0_lang_up, t, torch.randn_like(x))
+            with torch.no_grad():
+                v = cfm_model(t, x)
+                x0_hat = x + (1 - t)*v #could add a multi-step ODE solver, for more accuracy
+                eps_hat = x - t*v
+            x0_lang_up = x0_hat.detach().clone()
+            x0_lang_up = x0_lang_up.requires_grad_()
+            for _ in range(langevin_mc_steps):
+                with torch.enable_grad():
+                    gaussian_err = ((x0_lang_up - x0_hat)**2).sum()/(2*(r[i])**2)
+                    gauss_grad = torch.autograd.grad(gaussian_err, x0_lang_up)[0]
+                    
+                    meas_err = ((meas_func(x0_lang_up) - conditioning_per_batch)**2).sum()/(2*beta**2)
+                    meas_grad = torch.autograd.grad(meas_err, x0_lang_up)[0]
+                
+                x0_lang_up = x0_lang_up - eta[i] * gauss_grad - eta[i] * meas_grad + (2*eta[i])**0.5 * torch.randn_like(x0_lang_up)
+            
+            pbar.set_postfix({'distance': meas_err.item()}, refresh=False)
+
+        samples.append(x0_lang_up.detach().cpu().numpy())
     
-    x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point#torch.randn(samples_size, device=device)
-    conditioning_per_batch = conditioning #conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
-    pbar = tqdm(ts[:-1])       
-    for t in pbar:
-        x = x.requires_grad_()
-        v = cfm_model(t, x)
-        
-        scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
-                                           grad={"t" : t, "v" : v},
-                                           **kwargs)
+    return np.concat(samples)
 
 # def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
 #                    samples_per_batch, total_samples, dims_of_img, 

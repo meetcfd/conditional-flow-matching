@@ -31,6 +31,8 @@ def coarse_wall_pres_forward(x_hat, **kwargs):
     x_pred = det_model(x_hat)
     return interpolate(x_pred, size=size, mode=mode)
 
+#------------------------------------------------------------------------------------------#
+
 def cost_func(meas_func, x_hat, measurement, **kwargs):
     pred_measurement = meas_func(x_hat, **kwargs)
     diff = pred_measurement - measurement
@@ -155,11 +157,8 @@ def grad_cost_func_parallel_MC(t, x, v, cfm_model, **kwargs): #meas_func, x, mea
 
 def grad_cost_func_DPS(meas_func, x, measurement, cost_func=cost_func, **kwargs):
     pass
-    # x_hat = x + (1 - kwargs["grad"]["t"])*kwargs["grad"]["v"]
-    # eps_hat = x - (kwargs["grad"]["t"])*kwargs["grad"]["v"]
     
-    # for _ in kwargs["grad"]["steps"]:
-        
+#------------------------------------------------------------------------------------------#    
 
 def sample_noise(samples_size, dims_of_img, use_heavy_noise, device, **kwargs):
     if not use_heavy_noise:
@@ -210,5 +209,5 @@ def ssag_sample(first_momt :torch.Tensor, second_momt: torch.Tensor, dev_matrix:
         term2 = (scale * 1/(K-1))**0.5 * dev_matrix.T @ torch.randn(K, device=device) if not parallel else (scale * 1/(K-1))**0.5 * torch.transpose(dev_matrix, 0, -1) @ torch.randn(K, device=device)
         return (mean + term1 + term2).view(sample_view) if not parallel else (mean + term1 + term2.T).view(sample_view)
     
-MEAS_MODELS = {"inpainting": inpainting, "partial_wall_pres_forward": partial_wall_pres_forward,
+MEAS_MODELS = {"inpainting": inpainting2, "partial_wall_pres_forward": partial_wall_pres_forward,
                "coarse_wall_pres_forward": coarse_wall_pres_forward}

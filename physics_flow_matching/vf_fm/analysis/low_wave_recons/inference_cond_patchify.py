@@ -30,14 +30,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ## Condition on $y^+$ and sparse sensors
 
-exp = 7
+exp = 3
 iteration = 9
-ot_cfm_model = UNetModel(dim=[3, 16, 16],
-                        channel_mult=(1,2,2),
+ot_cfm_model = UNetModel(dim=[3, 64, 64],
+                        channel_mult=(1,2,3,4),
                         num_channels=64,
                         num_res_blocks=2,
                         num_head_channels=64,
-                        attention_resolutions="32",
+                        attention_resolutions="16,8",
                         dropout=0.0,
                         use_new_attention_order=True,
                         use_scale_shift_norm=True,
@@ -54,7 +54,7 @@ def meas_func(x, **kwargs):
     return x * kwargs['mask']
 
 # %%
-coords = np.random.choice(320*200, size = 1000) #10000
+coords = np.random.choice(320*200, size = 10000) #10000
 coord1 = coords % 320
 coord2 = coords // 320
 mask = np.zeros((1,1,320, 200))
@@ -77,4 +77,4 @@ samples = infer_grad(fm = FlowMatcher(1e-3), cfm_model=partial(ot_cfm_model, y=y
                      rf_start=False, nu=None, mask=torch.from_numpy(mask).to(device), swag=False)
 
 # %%
-np.save(f"/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/vf_fm/exps/low_wave_recons/exp_{exp}/samples_{iteration}iter_500_y{yp[yp_ind]}_test_1000", samples)
+np.save(f"/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/vf_fm/exps/low_wave_recons/exp_{exp}/samples_{iteration}iter_500_y{yp[yp_ind]}_test_10000", samples)

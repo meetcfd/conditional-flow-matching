@@ -11,6 +11,7 @@ from tqdm import tqdm
 from torchcfm.conditional_flow_matching import *
 from physics_flow_matching.unet.unet import UNetModelWrapper as UNetModel
 from physics_flow_matching.inference_scripts.cond import infer_grad_generalized
+from physics_flow_matching.inference_scripts.uncond import infer
 from physics_flow_matching.inference_scripts.utils import grad_cost_func_generalized, sample_noise
 
 yp = {0:5, 1:20, 2:40}
@@ -28,14 +29,14 @@ X = (data - m)/std
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-exp = 3
+exp = 8
 iteration = 9
 ot_cfm_model = UNetModel(dim=[3, 64, 64],
                         channel_mult=(1,2,3,4),
                         num_channels=64,
                         num_res_blocks=2,
                         num_head_channels=64,
-                        attention_resolutions="16, 8",
+                        attention_resolutions="128",
                         dropout=0.0,
                         use_new_attention_order=True,
                         use_scale_shift_norm=True,
@@ -47,55 +48,41 @@ ot_cfm_model.load_state_dict(state["model_state_dict"])
 ot_cfm_model.to(device)
 ot_cfm_model.eval();
 
-def meas_func_1(x, **kwargs):
-    if 'start' not in kwargs.keys():
-        return x * kwargs['mask']
-    else:
-        return x[..., -kwargs['start']:, :] * kwargs['mask']
-
 def meas_func_2(x, **kwargs):
     return x[..., kwargs['slice'], :]
 
+total_all_samples = 500
 total_samples = 1
 samples_per_batch = 1
 streamwise_length = 128
 window_length = streamwise_length//2
-num_sensors = 1000
-
-coords = np.random.choice(320*200, size = num_sensors)
-coord1 = coords % 320
-coord2 = coords // 320
-mask = np.zeros((1,1,320, 200))
-mask[..., coord1, coord2] = 1.
 
 slic = slice(0,window_length)
 
-conds = X[:5000:10] * mask
-
 samples = []
 
-for j, cond in enumerate(conds):
+for j, cond in enumerate(range(total_all_samples)):
     print(f"Generating  sample : {j}")
     gen_sample = []
     for i in range(320//window_length - 1):
         if i == 0:
-            sample = infer_grad_generalized(fm = FlowMatcher(1e-3), cfm_model=partial(ot_cfm_model, y=yp_ind*torch.ones(samples_per_batch, device=device, dtype=torch.int)),
+            sample = infer(cfm_model=ot_cfm_model,
                             total_samples=total_samples, samples_per_batch=samples_per_batch,
-                            dims_of_img=(3,streamwise_length,200), num_of_steps=300, grad_cost_func=grad_cost_func_generalized, meas_func_list=[meas_func_1],
-                            conditioning_list=[torch.from_numpy(cond[None][..., :streamwise_length, :]).to(device)], conditioning_scale_list=[1.], device=device, 
-                            sample_noise=sample_noise, use_heavy_noise=False,
-                            rf_start=False, nu=None, mask=torch.from_numpy(mask[..., :streamwise_length, :]).to(device), swag=False)
+                            use_odeint=True,
+                            dims_of_img=(3,streamwise_length,200), t_start=0., t_end=1.,
+                            scale=False, device=device, use_heavy_noise=False,
+                            rf_start=False, nu=None, swag=False, y=yp_ind*torch.ones(samples_per_batch, device=device, dtype=torch.int))
             gen_sample.append(sample)
         else:
             prev_sample = gen_sample[-1] if i != 1 else gen_sample[-1][..., -window_length:, :]
             sensor_slice = slice((i + 1)*window_length, (i+2)*window_length)
             sample = infer_grad_generalized(fm = FlowMatcher(1e-3), cfm_model=partial(ot_cfm_model, y=yp_ind*torch.ones(samples_per_batch, device=device, dtype=torch.int)),
                             total_samples=total_samples, samples_per_batch=samples_per_batch,
-                            dims_of_img=(3,streamwise_length,200), num_of_steps=300, grad_cost_func=grad_cost_func_generalized, meas_func_list=[meas_func_1, meas_func_2],
-                            conditioning_list=[torch.from_numpy(cond[None][..., sensor_slice, :]).to(device), torch.from_numpy(prev_sample).to(device)],
-                            conditioning_scale_list=[1.0, 1.0], device=device,
+                            dims_of_img=(3,streamwise_length,200), num_of_steps=300, grad_cost_func=grad_cost_func_generalized, meas_func_list=[meas_func_2],
+                            conditioning_list=[torch.from_numpy(prev_sample).to(device)],
+                            conditioning_scale_list=[1.0], device=device,
                             sample_noise=sample_noise, use_heavy_noise=False,
-                            rf_start=False, nu=None, mask=torch.from_numpy(mask[..., sensor_slice, :]).to(device), slice=slic, start=64
+                            rf_start=False, nu=None, slice=slic, start=64
                             , swag=False)
             gen_sample.append(sample[..., -window_length:, :])
 
@@ -103,6 +90,6 @@ for j, cond in enumerate(conds):
 
 samples = np.concat(samples, axis=0)
 
-np.save(f"/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/vf_fm/exps/low_wave_recons/exp_{exp}/samples_{iteration}iter_500_y20_ag_{num_sensors}", samples)
+np.save(f"/home/meet/FlowMatchingTests/conditional-flow-matching/physics_flow_matching/vf_fm/exps/low_wave_recons/exp_{exp}/samples_{iteration}iter_500_y20_ag_wo_sensors", samples)
 
 
