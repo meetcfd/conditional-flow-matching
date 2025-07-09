@@ -9,8 +9,8 @@ from physics_flow_matching.unet.mlp import MLP_Wrapper as MLP
 from torch.utils.data import DataLoader
 from physics_flow_matching.multi_fidelity.synthetic.dataset import flow_guidance_dists
 # from physics_flow_matching.multi_fidelity.synthetic.dataset import Syn_Data_FM
-from physics_flow_matching.utils.train import train_model
-from physics_flow_matching.utils.obj_funcs import DD_loss
+from physics_flow_matching.utils.train_contrastive import train_model
+from physics_flow_matching.utils.obj_funcs import Contrastive_loss
 from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -43,7 +43,8 @@ def main(config_path):
     dataset =  flow_guidance_dists(dist_name1=config.dataset.dist_name1,
                                    dist_name2=config.dataset.dist_name2, n=config.dataset.n,
                                    seed=config.dataset.seed, 
-                                   normalize=config.dataset.normalize if hasattr(config.dataset, 'normalize') else False)
+                                   normalize=config.dataset.normalize if hasattr(config.dataset, 'normalize') else False,
+                                   contrastive=config.dataset.contrastive if hasattr(config.dataset, 'contrastive') else False)
     
     #Syn_Data_FM(data_params=config.dataset.data_params, n=config.dataset.n, 
                         #   base_data_params=config.dataset.base_data_params if hasattr(config.dataset, "base_data_params") else None,
@@ -74,7 +75,7 @@ def main(config_path):
     
     sched = None#CosineAnnealingLR(optim, config.scheduler.T_max, config.scheduler.eta_min)
     
-    loss_fn = DD_loss
+    loss_fn = Contrastive_loss
     
     train_model(model=model,
                 FM=FM,
@@ -92,7 +93,8 @@ def main(config_path):
                 restart=config.restart,
                 return_noise=config.FM.return_noise,
                 restart_epoch=config.restart_epoch,
-                class_cond=config.mlp.class_cond if hasattr(config.mlp, 'class_cond') else False)
+                class_cond=config.mlp.class_cond if hasattr(config.mlp, 'class_cond') else False,
+                lmbda = config.FM.lmbda if hasattr(config.FM, 'lmbda') else 0.05)
 
 if __name__ == '__main__':
     main(sys.argv[1])

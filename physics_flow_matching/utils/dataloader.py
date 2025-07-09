@@ -297,7 +297,7 @@ def get_loaders_wmvf_baseline(wm_paths, vf_paths, batch_size, time_cutoff, datas
     
 #     return train_dataloader, test_dataloader
 
-def get_joint_loaders(vf_paths, batch_size, dataset_):
+def get_joint_loaders(vf_paths, batch_size, dataset_, contrastive=False):
     
     def norm(d, m, s):
         return (d-m)/s
@@ -316,7 +316,7 @@ def get_joint_loaders(vf_paths, batch_size, dataset_):
     m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
 
     data = norm(data, m, s)
-    train_dataloader = DataLoader(dataset_(data), batch_size=batch_size, shuffle=True)
+    train_dataloader = DataLoader(dataset_(data, contrastive=contrastive), batch_size=batch_size, shuffle=True)
        
     return train_dataloader
 

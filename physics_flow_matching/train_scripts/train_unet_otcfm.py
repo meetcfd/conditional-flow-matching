@@ -8,8 +8,8 @@ import numpy as np
 from physics_flow_matching.unet.unet import UNetModelWrapper as UNetModel
 from physics_flow_matching.utils.dataloader import get_joint_loaders #get_loaders_vf_fm
 from physics_flow_matching.utils.dataset import DATASETS
-from physics_flow_matching.utils.train import train_model
-from physics_flow_matching.utils.obj_funcs import DD_loss
+from physics_flow_matching.utils.train_contrastive import train_model
+from physics_flow_matching.utils.obj_funcs import Contrastive_loss
 from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -41,7 +41,8 @@ def main(config_path):
     
     train_dataloader = get_joint_loaders(vf_paths=config.dataloader.datapath,
                                          batch_size=config.dataloader.batch_size,
-                                         dataset_=DATASETS[config.dataloader.dataset])
+                                         dataset_=DATASETS[config.dataloader.dataset],
+                                         contrastive=config.dataloader.contrastive if hasattr(config.dataloader, 'contrastive') else False)
     
     # train_dataloader = get_loaders_vf_fm(vf_paths=config.dataloader.datapath,
     #                                     batch_size=config.dataloader.batch_size,
@@ -70,7 +71,7 @@ def main(config_path):
     
     sched = None#CosineAnnealingLR(optim, config.scheduler.T_max, config.scheduler.eta_min)
     
-    loss_fn = DD_loss
+    loss_fn = Contrastive_loss
     
     train_model(model=model,
                 FM=FM,
@@ -89,7 +90,8 @@ def main(config_path):
                 return_noise=config.FM.return_noise,
                 restart_epoch=config.restart_epoch,
                 class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False,
-                is_base_gaussian=config.FM.is_base_gaussian if hasattr(config.FM, 'is_base_gaussian') else False)
+                is_base_gaussian=config.FM.is_base_gaussian if hasattr(config.FM, 'is_base_gaussian') else False,
+                lmbda=config.FM.lmbda if hasattr(config.FM, 'lmbda') else 0.05)
 
 if __name__ == '__main__':
     main(sys.argv[1])

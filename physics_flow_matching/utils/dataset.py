@@ -61,16 +61,25 @@ class VF_FM_patchify(VF_FM):
             return x0[..., patch_x, patch_y], x1[..., patch_x, patch_y]
     
 class Joint(Dataset):
-    def __init__(self, data):
+    def __init__(self, data, contrastive=False):
         super().__init__()
         self.data = data
         self.shape = data.shape[1:]
+        self.contrastive = contrastive
+        self.n = data.shape[0]
     
     def __len__(self):
         return self.data.shape[0]
     
     def __getitem__(self, index):
-        return np.empty(self.shape, dtype=np.float32), self.data[index]
+        v1, v2 =  np.empty(self.shape, dtype=np.float32), self.data[index]
+        if self.contrastive:
+            random_index = np.random.randint(0, self.n)
+            while index == random_index:
+                random_index = np.random.randint(0, self.n)
+            v1_cont, v2_cont = np.empty(self.shape, dtype=np.float32), self.data[random_index]
+            return v1, v2, v1_cont, v2_cont
+        return v1, v2
     
 # class Wallpres(Dataset):
 #     def __init__(self, data, mean, std) -> None:

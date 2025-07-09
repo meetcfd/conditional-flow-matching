@@ -14,6 +14,19 @@ def get_batch(FM : Union[FlowMatcher, RectifiedFlow, ConditionalFlowMatcher, Exa
         return t[..., None], xt, ut, noise
     return t[..., None], xt, ut
 
+def get_batch_cont(FM : Union[FlowMatcher, RectifiedFlow, ConditionalFlowMatcher, ExactOptimalTransportConditionalFlowMatcher], x0 : th.Tensor, x1 : th.Tensor, x0_cont : th.Tensor, x1_cont : th.Tensor, return_noise=False):
+        
+    if return_noise:
+        t, xt, ut, noise = FM.sample_location_and_conditional_flow(x0, x1, return_noise=return_noise)
+        _, __, ut_cont, noise_cont  = FM.sample_location_and_conditional_flow(x0_cont, x1_cont, t=t, return_noise=return_noise)
+    else:
+        t, xt, ut = FM.sample_location_and_conditional_flow(x0, x1, return_noise=return_noise)
+        _, __, ut_cont = FM.sample_location_and_conditional_flow(x0_cont, x1_cont, t=t, return_noise=return_noise)
+
+    if return_noise:
+        return t[..., None], xt, ut, ut_cont, (noise, noise_cont)
+    return t[..., None], xt, ut, ut_cont
+
 def get_grad_energy(x, model, retain_graph=False, create_graph=False):
     with th.enable_grad():
         x = x.requires_grad_(True)

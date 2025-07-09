@@ -41,7 +41,8 @@ def main(config_path):
     
     train_dataloader = get_joint_loaders(vf_paths=config.dataloader.datapath,
                                          batch_size=config.dataloader.batch_size,
-                                         dataset_=DATASETS[config.dataloader.dataset])
+                                         dataset_=DATASETS[config.dataloader.dataset],
+                                         contrastive=config.dataloader.contrastive if hasattr(config.dataloader, 'contrastive') else False)
     
     #get_loaders_vf_fm(vf_paths=config.dataloader.datapath,
                        #                 batch_size=config.dataloader.batch_size,
@@ -72,6 +73,26 @@ def main(config_path):
     
     loss_fn = DD_loss
     
+    # train_model(model=model,
+    #             FM=FM,
+    #             train_dataloader=train_dataloader,
+    #             optimizer=optim,
+    #             sched=sched,
+    #             loss_fn=loss_fn,
+    #             writer=writer,
+    #             num_epochs=config.num_epochs,
+    #             print_epoch_int=config.print_epoch_int,
+    #             save_epoch_int=config.save_epoch_int,
+    #             print_within_epoch_int=config.print_with_epoch_int,
+    #             path=savepath,
+    #             device=dev,
+    #             restart=config.restart,
+    #             return_noise=config.FM.return_noise,
+    #             restart_epoch=config.restart_epoch,
+    #             class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False,
+    #             is_base_gaussian=config.FM.is_base_gaussian if hasattr(config.FM, 'is_base_gaussian') else False,
+    #             lmbda=config.FM.lmbda if hasattr(config.FM, 'lmbda') else 0.05)
+      
     train_model(model=model,
                 FM=FM,
                 train_dataloader=train_dataloader,
