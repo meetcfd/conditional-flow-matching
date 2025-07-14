@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from physics_flow_matching.multi_fidelity.synthetic.dists.base import get_distribution
+from torchcfm.utils import sample_8gaussians, sample_moons
 
 class Syn_Data_FM(Dataset):
     
@@ -121,7 +122,7 @@ class Syn_Data_FM_multi_to_multi(Dataset):
         return v1, v2
     
 class flow_guidance_dists(Dataset):
-    def __init__(self, dist_name1: str, dist_name2: str, n: int, seed: int = 42, normalize : bool = False, contrastive=False):
+    def __init__(self, dist_name1: str, dist_name2: str, n: int, seed: int = 42, normalize : bool = False, contrastive=False, flip=False):
         super().__init__()
         self.dist1 = get_distribution(dist_name1)
         self.dist2 = get_distribution(dist_name2)
@@ -132,7 +133,12 @@ class flow_guidance_dists(Dataset):
         self.data2 = self.dist2.sample(n, device='cpu')
         if normalize:
             self.data1 = (self.data1 - self.data1.mean(dim=0, keepdim=True))/ self.data1.std(dim=0, keepdim=True)
-            self.data2 = (self.data2 - self.data2.mean(dim=0, keepdim=True))/ self.data2.std(dim=0, keepdim=True)
+            if flip:
+                m = self.data2.mean(dim=0, keepdim=True)
+                s = self.data2.std(dim=0, keepdim=True)
+                self.data2 = (-self.data2 - m)/ s
+            else:
+                self.data2 = (self.data2 - self.data2.mean(dim=0, keepdim=True))/ self.data2.std(dim=0, keepdim=True)
         
     def __len__(self):
         return self.n
@@ -145,4 +151,22 @@ class flow_guidance_dists(Dataset):
                 random_index = np.random.randint(0, self.n)
             v1_cont, v2_cont = self.data1[random_index], self.data2[random_index]
             return v1, v2, v1_cont, v2_cont
-        return v1, v2 
+        return v1, v2
+    
+class flow_guidance_dists_em(flow_guidance_dists):
+    def __init__(self, dist_name1: str, dist_name2: str, n: int, seed: int = 42,
+                 normalize : bool = True, contrastive : bool =False,
+                 is_phase2: bool = False, flip: bool = False):
+        super().__init__(dist_name1, dist_name2, n, seed, normalize, contrastive, flip)
+        self.is_phase2 = is_phase2
+    
+    def __getitem__(self, index):
+        if not self.is_phase2:
+            v1, v2 = super().__getitem__(index)
+            return v1, v2
+        else:
+            v1, v2 = super().__getitem__(index)
+            v1_init = self.data1[np.random.randint(0, self.n)]
+            v2_init = self.data2[np.random.randint(0, self.n)]
+            v2_data = self.data2[np.random.randint(0, self.n)]
+            return v1, v1_init, v2, v2_data, v2_init
