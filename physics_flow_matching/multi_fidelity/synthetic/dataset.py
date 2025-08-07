@@ -166,7 +166,60 @@ class flow_guidance_dists_em(flow_guidance_dists):
             return v1, v2
         else:
             v1, v2 = super().__getitem__(index)
-            v1_init = self.data1[np.random.randint(0, self.n)]
-            v2_init = self.data2[np.random.randint(0, self.n)]
             v2_data = self.data2[np.random.randint(0, self.n)]
-            return v1, v1_init, v2, v2_data, v2_init
+            return v1, v2, v2_data
+        
+class flow_guidance_dists_em_class_cond(Dataset):
+    def __init__(self, dist_name1: str, dist_name2: str, n: int, seed: int = 42, normalize : bool = True, flip=True, class_cond=True, is_phase2=False):
+        super().__init__()
+        self.dist1 = get_distribution(dist_name1)
+        self.dist2 = get_distribution(dist_name2)
+        self.n = n
+        self.is_phase2 = is_phase2
+        self.class_cond = class_cond
+        np.random.seed(seed)
+        self.data1 = self.dist1.sample(n, device='cpu')
+        self.data2 = self.dist2.sample(n, device='cpu')
+        if class_cond:
+            self.data3 = self.dist2.sample(n, device='cpu')
+        if normalize:
+            self.data1 = (self.data1 - self.data1.mean(dim=0, keepdim=True))/ self.data1.std(dim=0, keepdim=True)
+            if flip:
+                m = self.data2.mean(dim=0, keepdim=True)
+                s = self.data2.std(dim=0, keepdim=True)
+                self.data2 = (-self.data2 - m)/ s
+            else:
+                self.data2 = (self.data2 - self.data2.mean(dim=0, keepdim=True))/ self.data2.std(dim=0, keepdim=True)
+            self.data3 = (self.data3 - self.data3.mean(dim=0, keepdim=True))/ self.data3.std(dim=0, keepdim=True) if class_cond else None
+            
+    def __len__(self):
+        return self.n if not self.class_cond else self.n * 2
+    
+    def __getitem__(self, index):
+        if self.class_cond:
+            class_index = index % 2
+            index = index // 2
+            v1 = self.data1[index]
+            v2 = self.data2[index] if class_index == 0 else self.data3[index]
+            y = torch.tensor(class_index)
+        else:
+            v1, v2 = self.data1[index], self.data2[index]
+            
+        if not self.is_phase2:
+            if self.class_cond:
+                return v1, v2, y
+            else:
+                return v1, v2
+        else:
+            if self.class_cond:
+                v1_init = self.data1[np.random.randint(0, self.n)]
+                v2_init = self.data2[np.random.randint(0, self.n)] if class_index==0 else self.data3[np.random.randint(0, self.n)]
+                v2_data = self.data2[np.random.randint(0, self.n)] if class_index==0 else self.data3[np.random.randint(0, self.n)]
+            else:
+                v1_init = self.data1[np.random.randint(0, self.n)]
+                v2_init = self.data2[np.random.randint(0, self.n)]
+                v2_data = self.data2[np.random.randint(0, self.n)]
+            if self.class_cond:
+                return v1, v1_init, v2, v2_data, v2_init, y
+            else:
+                return v1, v1_init, v2, v2_data, v2_init
