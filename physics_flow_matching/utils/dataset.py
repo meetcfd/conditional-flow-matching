@@ -469,7 +469,7 @@ class Patched_Dataset(Dataset):
     
     def __getitem__(self, index):
         patch_dims = self.patch_dims if not hasattr(self, "sample_patch_dims") else self.sample_patch_dims
-        time_ind, h_ind, w_ind = index, np.random.randint(0, self.space_ress[0]+ 2*self.pads[0] - patch_dims[0]), np.random.randint(0, self.space_ress[1]+ 2*self.pads[1] - patch_dims[0]) 
+        time_ind, h_ind, w_ind = index, np.random.randint(0, self.space_ress[0]+ 2*self.pads[0] - patch_dims[0]), np.random.randint(0, self.space_ress[1]+ 2*self.pads[1] - patch_dims[1]) 
         #index // self.ind_cumprod[1], index // self.ind_cumprod[2] 
         
         time_ind %=  self.time_steps
