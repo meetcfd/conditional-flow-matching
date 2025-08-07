@@ -6,6 +6,7 @@ from torchdiffeq import odeint
 from functools import partial
 from torch.distributions import Chi2
 from physics_flow_matching.utils.pre_procs_data import get_grad_energy, langevin_step, mala_condition
+from physics_flow_matching.inference_scripts.utils import calculate_pad_size, extract_non_overlapping_patches, recombine_non_overlapping_patches
 
 def infer(dims_of_img, total_samples, samples_per_batch,
           use_odeint, cfm_model, t_start, t_end,
@@ -185,6 +186,137 @@ def infer_em(dims_of_img, total_samples, samples_per_batch,
         return samples_list[0]
     else:
         if samples_list[0].ndim == 2:
+            return np.concatenate(samples_list)
+        else:
+            return np.concatenate(samples_list, axis=1)       
+#    return np.concatenate(samples_list) if len(samples_list) > 1 else samples_list[0]
+
+def infer_patched_v1(dims_of_img, location ,total_samples, samples_per_batch,
+                cfm_model, t_start, t_end,
+                scale, device, m=None, std=None, t_steps=200, use_heavy_noise=False, 
+                y = None, y0_provided = False, y0= None, all_traj=False, **kwargs):
+    
+    y0_ = y0.clone().detach() if y0_provided else None
+    cfm_model_ = lambda t, x : cfm_model(t, x, y=y)
+        
+    samples_list = []
+    
+    time = torch.linspace(t_start, t_end, t_steps).to(device)
+    dt = time[1] - time[0]
+    
+    for i in tqdm(range(total_samples//samples_per_batch)):
+        
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img 
+
+        with torch.no_grad():
+            if not use_heavy_noise and not y0_provided:
+                y0 = torch.randn(samples_size, device=device)
+            elif use_heavy_noise:
+                nu = kwargs["nu"]
+                chi2 = Chi2(torch.tensor([nu]))
+                
+                z = torch.randn(samples_size, device=device)
+                kappa = chi2.sample((z.shape[0],)).to(z.device)/nu
+                for _ in range(len(dims_of_img)-1):
+                    kappa = kappa[..., None]
+                y0 = z/torch.sqrt(kappa)
+            elif y0_provided:
+                y0 = (y0_[i*samples_size[0] : (i+1)*samples_size[0]]).clone().detach()
+
+            y0 = torch.concat([y0, location], dim=1)
+            traj = []
+            x = y0.clone()
+            for t in time:
+                v = cfm_model_(t, x)
+                x[:, :3] += v[:, :3]*dt
+                traj.append(x[:, :3])
+                
+        out = traj.detach().cpu().numpy() if all_traj else traj[-1].detach().cpu().numpy() 
+        
+        if scale:
+            assert m is not None and std is not None, "Provide output scaling for generated samples"
+            out *= std
+            out += m
+            
+        samples_list.append(out)
+
+    if len(samples_list) == 1:
+        return samples_list[0]
+    else:
+        if not all_traj:
+            return np.concatenate(samples_list)
+        else:
+            return np.concatenate(samples_list, axis=1)    
+    
+
+def infer_patched(dims_of_img, patch_size, total_samples, samples_per_batch,
+                cfm_model, t_start, t_end,
+                scale, device, m=None, std=None, t_steps=200, use_heavy_noise=False, 
+                y = None, y0_provided = False, y0= None, all_traj=False, **kwargs):
+
+    y0_ = y0.clone().detach() if y0_provided else None
+    cfm_model_ = lambda t, x : cfm_model(t, x, y=y)
+        
+    samples_list = []
+    
+    time = torch.linspace(t_start, t_end, t_steps).to(device)
+    dt = time[1] - time[0]
+    
+    for i in tqdm(range(total_samples//samples_per_batch)):
+        
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img 
+    
+        with torch.no_grad():
+            if not use_heavy_noise and not y0_provided:
+                y0 = torch.randn(samples_size, device=device)
+            elif use_heavy_noise:
+                nu = kwargs["nu"]
+                chi2 = Chi2(torch.tensor([nu]))
+                
+                z = torch.randn(samples_size, device=device)
+                kappa = chi2.sample((z.shape[0],)).to(z.device)/nu
+                for _ in range(len(dims_of_img)-1):
+                    kappa = kappa[..., None]
+                y0 = z/torch.sqrt(kappa)
+            elif y0_provided:
+                y0 = (y0_[i*samples_size[0] : (i+1)*samples_size[0]]).clone().detach()
+        
+            traj = []
+            x = y0.clone()
+            
+            B, _, H, W, _, _, _, _, pad_h, pad_w = calculate_pad_size(x, patch_size) 
+            
+            x_coord = (torch.linspace(-1, 1, H+2*pad_h)[None, None, :, None]).to(device) * torch.ones(B, 1, H+2*pad_h, W+2*pad_w).to(device)
+        
+            z_coord = (torch.linspace(-1, 1, W+2*pad_w)[None, None, None, :]).to(device) * torch.ones(B, 1, H+2*pad_h, W+2*pad_w).to(device)
+            
+            for t in time:
+                offset_x, offset_y = (np.random.randint(low=0, high=pad_h+1), np.random.randint(low=0, high=pad_w+1))
+                x_patchified = extract_non_overlapping_patches(x, (offset_x, offset_y), patch_size, x_coord, z_coord)
+                v = cfm_model_(t, x_patchified)
+                x_patchified[:, :3] += v[:, :3]*dt
+                x = recombine_non_overlapping_patches(x_patchified[:, :3], dims_of_img, (pad_h, pad_w), (offset_x, offset_y), patch_size)
+                traj.append(x)
+                
+        out = traj.detach().cpu().numpy() if all_traj else traj[-1].detach().cpu().numpy() 
+        
+        if scale:
+            assert m is not None and std is not None, "Provide output scaling for generated samples"
+            out *= std
+            out += m
+            
+        samples_list.append(out)
+
+    if len(samples_list) == 1:
+        return samples_list[0]
+    else:
+        if not all_traj:
             return np.concatenate(samples_list)
         else:
             return np.concatenate(samples_list, axis=1)       

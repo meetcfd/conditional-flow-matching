@@ -1,6 +1,8 @@
 import torch 
 from torch.distributions.chi2 import Chi2
 from torch.nn.functional import interpolate
+import torch.nn.functional as F
+from math import floor
 
 def inpainting(x_hat, **kwargs):
     # slice_x, slice_y = slice(kwargs["sx"],kwargs["ex"]), slice(kwargs["sy"],kwargs["ey"]),
@@ -210,4 +212,64 @@ def ssag_sample(first_momt :torch.Tensor, second_momt: torch.Tensor, dev_matrix:
         return (mean + term1 + term2).view(sample_view) if not parallel else (mean + term1 + term2.T).view(sample_view)
     
 MEAS_MODELS = {"inpainting": inpainting2, "partial_wall_pres_forward": partial_wall_pres_forward,
-               "coarse_wall_pres_forward": coarse_wall_pres_forward}
+               "coarse_wall_pres_forward": coarse_wall_pres_forward, "inpainting_2": inpainting}
+
+#------------------------------------------------------------------------------------------#
+def calculate_pad_size(input_tensor: torch.Tensor, patch_size) -> tuple:
+    B, C, H, W = input_tensor.shape
+    # print(B,C,H,W)
+    patch_h, patch_w = patch_size
+    num_patch_H, num_patch_W = H//patch_h, W//patch_w
+    pad_h, pad_w = (num_patch_H+1)*patch_h - H, (num_patch_W+1)*patch_w - W
+    return B, C, H, W, patch_h, patch_w, num_patch_H, num_patch_W, pad_h, pad_w
+    
+def extract_non_overlapping_patches(
+    input_tensor: torch.Tensor,
+    offset: tuple[int, int],
+    patch_size: tuple[int, int],
+    x_coord : torch.Tensor,
+    z_coord : torch.Tensor,
+) -> torch.Tensor:
+
+    h_offset, w_offset = offset
+    
+    B, C, H, W, patch_h, patch_w, num_patch_H, num_patch_W, pad_h, pad_w = calculate_pad_size(input_tensor, patch_size)
+    
+    padding_values = (pad_w, pad_w, pad_h, pad_h)
+            
+    padded_tensor = F.pad(input_tensor, padding_values, "constant", 0)
+    padded_tensor = torch.cat([padded_tensor, x_coord, z_coord], dim=1)
+
+    offset_tensor = padded_tensor[:, :, h_offset:, w_offset:]
+
+    patches_h = offset_tensor.unfold(dimension=2, size=patch_h, step=patch_h)
+    
+    patches_hw = patches_h.unfold(dimension=3, size=patch_w, step=patch_w)
+
+    output_tensor = patches_hw.permute(0, 2, 3, 1, 4, 5).contiguous()
+    
+    output_tensor = output_tensor[:, :num_patch_H+1, :num_patch_W+1]
+
+    B_out, num_h, num_w, C_out, pH, pW = output_tensor.shape
+    
+    final_patches = output_tensor.reshape(-1, C_out, pH, pW)
+
+    return final_patches
+
+def recombine_non_overlapping_patches(input_tensor:torch.Tensor, dims_of_img, pad_size, offset, patch_size):
+    all_patches, C, pH, pW = input_tensor.shape
+    offset_x, offset_z = offset[0], offset[1]
+    pad_x, pad_z = pad_size[0],  pad_size[1]
+    
+    num_h, num_w = dims_of_img[1]//patch_size[0], dims_of_img[2]//patch_size[1]
+    batch = all_patches // ((num_w+1) * (num_h+1))
+    
+    reshaped_patches = input_tensor.view(batch, num_h+1, num_w+1, C, pH, pW)
+    
+    permuted_patches = reshaped_patches.permute(0, 3, 1, 4, 2, 5).contiguous()
+    
+    output_imgs = permuted_patches.view(batch, C, (num_h+1)*pH, (num_w+1)*pW)
+    
+    output_imgs =output_imgs[..., pad_x - offset_x:dims_of_img[1]  + pad_x - offset_x,  pad_z - offset_z: dims_of_img[2] + pad_z - offset_z]
+    
+    return output_imgs

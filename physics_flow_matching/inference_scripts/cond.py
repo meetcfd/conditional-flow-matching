@@ -8,6 +8,7 @@ from torchdyn.core import NeuralODE
 from torch.optim import LBFGS, SGD
 from physics_flow_matching.inference_scripts.utils import ssag_collect
 from typing import Union
+import torch.nn.functional as F
 
 def flowgrad(v_theta, cost_func, meas_func, measurement,
              device, num_of_samples, size,
@@ -640,6 +641,131 @@ def flow_daps(fm : Union[FlowMatcher, ExactOptimalTransportConditionalFlowMatche
     
     return np.concat(samples)
 
+def flow_padis(fm : FlowMatcher, cfm_model : torch.nn.Module,
+                samples_per_batch, total_samples, dims_of_img, 
+                num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+                device, refine, sample_noise, use_heavy_noise, rf_start, start_provided=False, start_point=None, **kwargs):
+    """https://arxiv.org/pdf/2406.02462 : patched flow matching FMPS"""
+    
+    
+    def extract_non_overlapping_patches(
+        input_tensor: torch.Tensor,
+        offset: tuple[int, int],
+        patch_size: tuple[int, int],
+        x_coord : torch.Tensor,
+        z_coord : torch.Tensor,
+    ) -> torch.Tensor:
+
+        B, C, H, W = input_tensor.shape
+        # print(B,C,H,W)
+        patch_h, patch_w = patch_size
+        h_offset, w_offset = offset
+        # print(h_offset, w_offset)
+        # print("\n")
+        padding_values = (patch_w, patch_w, patch_h, patch_h)
+                
+        padded_tensor = F.pad(input_tensor, padding_values, "constant", 0)
+        padded_tensor = torch.cat([padded_tensor, x_coord, z_coord], dim=1)
+
+        offset_tensor = padded_tensor[:, :, h_offset:, w_offset:]
+
+        patches_h = offset_tensor.unfold(dimension=2, size=patch_h, step=patch_h)
+        
+        patches_hw = patches_h.unfold(dimension=3, size=patch_w, step=patch_w)
+
+        output_tensor = patches_hw.permute(0, 2, 3, 1, 4, 5).contiguous()
+        
+        num_patch_H, num_patch_W = H//patch_h, W//patch_w
+        output_tensor = output_tensor[:, :num_patch_H+1, :num_patch_W+1]
+
+        B_out, num_h, num_w, C_out, pH, pW = output_tensor.shape
+        
+        final_patches = output_tensor.reshape(-1, C_out, pH, pW)
+
+        return final_patches
+    
+    def recombine_non_overlapping_patches(input_tensor:torch.Tensor, dims_of_img, patch_size, offset):
+        all_patches, C, pH, pW = input_tensor.shape
+        offset_x, offset_z = offset[0], offset[1]
+        
+        patch_x, patch_z = patch_size[0], patch_size[1]
+        
+        num_h, num_w = dims_of_img[1]//patch_size[0], dims_of_img[2]//patch_size[1]
+        batch = all_patches // ((num_w+1) * (num_h+1))
+        
+        reshaped_patches = input_tensor.view(batch, num_h+1, num_w+1, C, pH, pW)
+        
+        permuted_patches = reshaped_patches.permute(0, 3, 1, 4, 2, 5).contiguous()
+        
+        output_imgs = permuted_patches.view(batch, C, (num_h+1)*pH, (num_w+1)*pW)
+        
+        output_imgs = output_imgs[..., patch_x - offset_x:num_h*pH  + patch_x - offset_x,  patch_z - offset_z: num_w*pW + patch_z - offset_z]
+        
+        return output_imgs
+    
+    # torch.manual_seed(seed=42)
+    patch_size = kwargs["patch_size"]
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
+    dt = ts[1] - ts[0]
+    
+    samples_per_batch = 1
+    
+    samples = []
+    
+    for i in range(total_samples//samples_per_batch):
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img
+        
+        x_coord = (torch.linspace(-1, 1, dims_of_img[1]+2*patch_size[0])[None, None, :, None]).to(device) * torch.ones(samples_size[0],1,samples_size[2]+2*patch_size[0],
+                                                                                                          samples_size[3]+2*patch_size[1]).to(device)
+        
+        z_coord = (torch.linspace(-1, 1, dims_of_img[2]+2*patch_size[1])[None, None, None, :]).to(device) * torch.ones(samples_size[0],1,samples_size[2]+2*patch_size[0],
+                                                                                                          samples_size[3]+2*patch_size[1]).to(device)
+        
+        if kwargs["swag"]:
+            kwargs["model"].sample()
+
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point#torch.randn(samples_size, device=device)
+        conditioning_per_batch = conditioning #conditioning[i*samples_per_batch:(i+1)*samples_per_batch] #
+        pbar = tqdm(ts[:-1])        
+        for t in pbar:
+            
+            _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
+            beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
+                             pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
+             
+            x_fixed = x.clone().detach()
+                           
+            for _ in range(refine): ##Picard Iteration
+                offset = (np.random.randint(0, high=patch_size[0]+1), np.random.randint(0, high=patch_size[1]+1))
+                x = x.requires_grad_()
+                x = extract_non_overlapping_patches(x, offset=offset, patch_size=patch_size, x_coord=x_coord, z_coord=z_coord)
+                
+                v = cfm_model(t, x)
+                
+                x = recombine_non_overlapping_patches(x, dims_of_img, patch_size, offset)
+                v = recombine_non_overlapping_patches(v, dims_of_img, patch_size, offset)
+                
+                x, v = x[:, :3], v[:, :3]
+                
+                scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
+                                                is_grad_free=False, grad={"t" : t, "v" : v},
+                                                **kwargs)
+                
+                scaled_grad *= torch.linalg.norm(v.flatten())
+                pbar.set_postfix({'distance': loss}, refresh=False)
+
+                v = v - conditioning_scale*scaled_grad #beta
+                x = x_fixed + v*dt #x + (v)*dt 
+                
+                x = x.detach()
+        
+        samples.append(x.cpu().numpy())
+        
+    return np.concatenate(samples)
 # def infer_grad_fd(fm : FlowMatcher, cfm_model : torch.nn.Module,
 #                    samples_per_batch, total_samples, dims_of_img, 
 #                    num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,

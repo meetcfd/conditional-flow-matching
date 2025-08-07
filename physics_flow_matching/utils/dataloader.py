@@ -320,7 +320,8 @@ def get_joint_loaders(vf_paths, batch_size, dataset_, contrastive=False):
        
     return train_dataloader
 
-def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True, spatial_cutoff=None, patch_dims=None):
+def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True, spatial_cutoff=None, z_spatial_cutoff=None, time_cutoff=None, patch_dims=None,
+                      multi_patch=False, zero_pad=True):
     
     def norm(d, m, s):
         return (d-m)/s
@@ -332,6 +333,7 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True, spat
             d = np.load(path)
             data.append(d)
         data = np.concatenate(data, axis=1)
+        data = data[..., :z_spatial_cutoff] if z_spatial_cutoff is not None else data
         m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
             
     elif (len(vf_paths) == 1 and type(vf_paths[0][0]) == str):
@@ -360,9 +362,12 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True, spat
     data = norm(data, m, s)
 
     if patch_dims is not None:
-        train_dataloader = DataLoader(dataset_(data[::jump], all_vel, patch_dims), batch_size=batch_size, shuffle=True)
+        if time_cutoff is not None:
+            train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump], all_vel, patch_dims, multi_patch, zero_pad), batch_size=batch_size, shuffle=True)
+        else:
+            train_dataloader = DataLoader(dataset_(data[::jump], all_vel, patch_dims), batch_size=batch_size, shuffle=True)
     else:
-        train_dataloader = DataLoader(dataset_(data[::jump], all_vel), batch_size=batch_size, shuffle=True)
+        train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump], all_vel), batch_size=batch_size, shuffle=True)
        
     return train_dataloader
 
