@@ -237,7 +237,7 @@ def extract_non_overlapping_patches(
     
     padding_values = (pad_w, pad_w, pad_h, pad_h)
             
-    padded_tensor = F.pad(input_tensor, padding_values, "constant", 0)
+    padded_tensor = F.pad(input_tensor, padding_values, "circular")  #F.pad(input_tensor, padding_values, "constant", 0) 
     padded_tensor = torch.cat([padded_tensor, x_coord, z_coord], dim=1)
 
     offset_tensor = padded_tensor[:, :, h_offset:, w_offset:]
