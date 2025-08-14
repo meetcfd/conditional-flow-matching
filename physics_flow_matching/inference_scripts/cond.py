@@ -408,7 +408,7 @@ def infer_grad(fm : FlowMatcher, cfm_model : torch.nn.Module,
                 scaled_grad *= torch.linalg.norm(v.flatten())
                 pbar.set_postfix({'distance': loss}, refresh=False)
 
-                v = v - conditioning_scale*scaled_grad #beta
+                v = v - conditioning_scale*scaled_grad  #beta
                 x = x_fixed + v*dt #x + (v)*dt 
                 
                 x = x.detach()
@@ -612,7 +612,7 @@ def flow_daps(fm : Union[FlowMatcher, ExactOptimalTransportConditionalFlowMatche
 
         x0_lang_up = None
         eps_hat = None       
-        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point[i*samples_per_batch:(i+1)*samples_per_batch]
         conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch]
         
         pbar = tqdm(ts[:-1])
@@ -624,18 +624,19 @@ def flow_daps(fm : Union[FlowMatcher, ExactOptimalTransportConditionalFlowMatche
                 x0_hat = x + (1 - t)*v #could add a multi-step ODE solver, for more accuracy
                 eps_hat = x - t*v
             x0_lang_up = x0_hat.detach().clone()
-            x0_lang_up = x0_lang_up.requires_grad_()
+            
             for _ in range(langevin_mc_steps):
+                x0_lang_up = x0_lang_up.requires_grad_()
                 with torch.enable_grad():
                     gaussian_err = ((x0_lang_up - x0_hat)**2).sum()/(2*(r[i])**2)
                     gauss_grad = torch.autograd.grad(gaussian_err, x0_lang_up)[0]
                     
-                    meas_err = ((meas_func(x0_lang_up) - conditioning_per_batch)**2).sum()/(2*beta**2)
+                    meas_err = ((meas_func(x0_lang_up, **kwargs) - conditioning_per_batch)**2).sum()/(2*beta**2)
                     meas_grad = torch.autograd.grad(meas_err, x0_lang_up)[0]
                 
                 x0_lang_up = x0_lang_up - eta[i] * gauss_grad - eta[i] * meas_grad + (2*eta[i])**0.5 * torch.randn_like(x0_lang_up)
-            
-            pbar.set_postfix({'distance': meas_err.item()}, refresh=False)
+                x0_lang_up = x0_lang_up.detach()
+            pbar.set_postfix({'distance': meas_err.item()*(2*beta**2)}, refresh=False)
 
         samples.append(x0_lang_up.detach().cpu().numpy())
     
@@ -997,3 +998,69 @@ def flow_padis(fm : FlowMatcher, cfm_model : torch.nn.Module,
 #                        optimizer_kwargs=collect_phase_optimizer_kwargs, collect_phase_optimizer_kwargs=collect_phase_optimizer_kwargs,
 #                        max_iterations=max_iterations - start_collect_phase, start_collect_phase=0, cov_rank=cov_rank, momt_coll_freq=momt_coll_freq,
 #                        regularize=regularize, reg_scale=reg_scale,parallel=parallel, **kwargs)
+
+
+def infer_grad_dpmc(fm : FlowMatcher, cfm_model : torch.nn.Module,
+                samples_per_batch, total_samples, dims_of_img, 
+                num_of_steps, grad_cost_func, meas_func, conditioning, conditioning_scale,
+                device, refine, sample_noise, use_heavy_noise, rf_start, eta,start_provided=False, start_point=None, 
+                noise_start_frac= 0.1,
+                noise_end_frac = 0.9,
+                **kwargs):
+    """https://arxiv.org/pdf/2411.07625 : grad based algorithm"""
+    
+    # torch.manual_seed(seed=42)
+    start = 5e-3 if rf_start else 0 
+    ts = torch.linspace(start, 1, num_of_steps, device=device)
+    dt = ts[1] - ts[0]
+    
+    samples_per_batch = 1
+    
+    samples = []
+    noise_start_step = int(num_of_steps*noise_start_frac)
+    noise_end_step  = int(num_of_steps*noise_end_frac)
+    for i in range(total_samples//samples_per_batch):
+        samples_size = samples_per_batch
+        if i == total_samples//samples_per_batch - 1:
+            samples_size = samples_per_batch + total_samples%samples_per_batch
+        samples_size = (samples_size,) + dims_of_img 
+        
+        if kwargs["swag"]:
+            kwargs["model"].sample()
+
+        x = sample_noise(samples_size, dims_of_img, use_heavy_noise, device, nu=kwargs["nu"]) if not start_provided else start_point[i*samples_per_batch:(i+1)*samples_per_batch]#torch.randn(samples_size, device=device)
+        conditioning_per_batch = conditioning[i*samples_per_batch:(i+1)*samples_per_batch] #conditioning[i*samples_per_batch:(i+1)*samples_per_batch] #
+        pbar = tqdm(ts[:-1])        
+        for step_idx, t in enumerate(pbar):
+            _, beta, a_t, b_t = fm.compute_lambda_and_beta(t)
+            beta, a_t, b_t = pad_t_like_x(beta, x).to(device),\
+                             pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
+             
+            x_fixed = x.clone().detach()
+            if noise_start_step <= step_idx < noise_end_step:
+                refine = refine
+            else:
+                refine = 1
+            for _ in range(refine): ##Picard Iteration
+                x = x.requires_grad_()
+                v = cfm_model(t, x)
+                
+                
+                scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
+                                                is_grad_free=False, grad={"t" : t, "v" : v},
+                                                **kwargs)
+                scaled_grad *= torch.linalg.norm(v.flatten())
+                pbar.set_postfix({'distance': loss}, refresh=False)
+
+                v = v - conditioning_scale*scaled_grad  #beta
+                if noise_start_step <= step_idx < noise_end_step:
+                    scale = (2 * eta[step_idx]).sqrt()
+                    x = x + v*dt + scale*torch.randn(x.shape, device=x.device)#x + (v)*dt 
+                else:
+                    x = x + v*dt
+                x = x.detach()
+        
+        
+        samples.append(x.cpu().numpy())
+        
+    return np.concatenate(samples)
