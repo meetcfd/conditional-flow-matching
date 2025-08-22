@@ -6,9 +6,9 @@ import os
 import torch as th
 import numpy as np
 from physics_flow_matching.unet.unet import UNetModelWrapper as UNetModel
-from physics_flow_matching.utils.dataloader import get_loaders_vf_fm
+from physics_flow_matching.utils.dataloader import get_loaders_wp_fm
 from physics_flow_matching.utils.dataset import DATASETS
-from physics_flow_matching.utils.train_patched import train_model
+from physics_flow_matching.utils.train_patched_wp import train_model
 from physics_flow_matching.utils.obj_funcs import DD_loss
 from torchcfm.conditional_flow_matching import FlowMatcher
 from torch.optim import Adam
@@ -39,16 +39,18 @@ def main(config_path):
     
     writer = SummaryWriter(log_dir=logpath)
     
-    train_dataloader = get_loaders_vf_fm(vf_paths=config.dataloader.datapath,
+    train_dataloader = get_loaders_wp_fm(wall_pres_path=config.dataloader.datapath,
+                                        nx=config.dataloader.nx,
+                                        nz=config.dataloader.nz,
+                                        nstep=config.dataloader.nstep,
                                         batch_size=config.dataloader.batch_size,
                                         dataset_=DATASETS[config.dataloader.dataset],
-                                        jump=config.dataloader.jump,
-                                        spatial_cutoff=config.dataloader.spatial_cutoff if hasattr(config.dataloader, 'spatial_cutoff') else None,
-                                        z_spatial_cutoff=config.dataloader.z_spatial_cutoff if hasattr(config.dataloader, 'z_spatial_cutoff') else None,
-                                        time_cutoff=config.dataloader.time_cutoff if hasattr(config.dataloader, 'time_cutoff') else None,
                                         patch_dims=config.dataloader.patch_dims if hasattr(config.dataloader, 'patch_dims') else None,
                                         multi_patch=config.dataloader.multi_patch if hasattr(config.dataloader, 'multi_patch') else False,
-                                        zero_pad=config.dataloader.zero_pad if  hasattr(config.dataloader, 'zero_pad') else True)
+                                        zero_pad=config.dataloader.zero_pad if  hasattr(config.dataloader, 'zero_pad') else True,
+                                        spatial_start=config.dataloader.spatial_start if  hasattr(config.dataloader, 'spatial_start') else 0,
+                                        spatial_cutoff =config.dataloader.cutoff if  hasattr(config.dataloader, 'cutoff') else None,
+                                        temporal_cutoff=config.dataloader.temporal_cutoff if  hasattr(config.dataloader, 'temporal_cutoff') else None)
         
     model = UNetModel(dim=config.unet.dim,
                       channel_mult=config.unet.channel_mult,
@@ -91,8 +93,7 @@ def main(config_path):
                 restart=config.restart,
                 return_noise=config.FM.return_noise,
                 restart_epoch=config.restart_epoch,
-                class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False,
-                ignore_index=config.ignore_index if hasattr(config, "ignore_index") else 3)
+                class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False)
 
 if __name__ == '__main__':
     main(sys.argv[1])
