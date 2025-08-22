@@ -255,7 +255,7 @@ def infer_patched_v1(dims_of_img, location ,total_samples, samples_per_batch,
 def infer_patched(dims_of_img, patch_size, total_samples, samples_per_batch,
                 cfm_model, t_start, t_end,
                 scale, device, m=None, std=None, t_steps=200, use_heavy_noise=False, 
-                y = None, y0_provided = False, y0= None, all_traj=False, **kwargs):
+                y = None, y0_provided = False, y0= None, all_traj=False, ignore_index=3, **kwargs):
 
     y0_ = y0.clone().detach() if y0_provided else None
     cfm_model_ = lambda t, x : cfm_model(t, x, y=y)
@@ -300,8 +300,8 @@ def infer_patched(dims_of_img, patch_size, total_samples, samples_per_batch,
                 offset_x, offset_y = (np.random.randint(low=0, high=pad_h+1), np.random.randint(low=0, high=pad_w+1))
                 x_patchified = extract_non_overlapping_patches(x, (offset_x, offset_y), patch_size, x_coord, z_coord)
                 v = cfm_model_(t, x_patchified)
-                x_patchified[:, :3] += v[:, :3]*dt
-                x = recombine_non_overlapping_patches(x_patchified[:, :3], dims_of_img, (pad_h, pad_w), (offset_x, offset_y), patch_size)
+                x_patchified[:, :ignore_index] += v[:, :ignore_index]*dt
+                x = recombine_non_overlapping_patches(x_patchified[:, :ignore_index], dims_of_img, (pad_h, pad_w), (offset_x, offset_y), patch_size)
                 traj.append(x)
                 
         out = traj.detach().cpu().numpy() if all_traj else traj[-1].detach().cpu().numpy() 

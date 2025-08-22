@@ -31,8 +31,7 @@ def train_model(model: nn.Module, FM, train_dataloader,
                 return_noise=False,
                 class_cond=False,
                 restart=False, restart_epoch=None,
-                is_base_gaussian=False,
-                ignore_index=3):
+                is_base_gaussian=False):
     
     if restart:
         start_epoch, model, optimizer, sched = restart_func(restart_epoch, path, model, optimizer, sched)
@@ -57,9 +56,9 @@ def train_model(model: nn.Module, FM, train_dataloader,
             else: 
                 t, xt, ut = get_batch(FM, x0.to(device), x1.to(device))
 
-            xt[:, ignore_index:] = x1[:, ignore_index:] # clean noise embeddings
+            xt[:, 1:] = x1[:, 1:] # clean noise embeddings
             ut_pred = model(t, xt, y=y.to(device) if class_cond else None)
-            loss = loss_fn(ut_pred[:, :ignore_index], ut[:, :ignore_index]) # only use velocity for updating the noisy part
+            loss = loss_fn(ut_pred[:, :1], ut[:, :1]) # only use velocity for updating the noisy part
             optimizer.zero_grad()
             loss.backward()       
             optimizer.step()      

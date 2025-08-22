@@ -345,6 +345,7 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True, spat
             data.append(d)
         data = np.concatenate(data, axis=1)
         data = data[:, :, :spatial_cutoff] if spatial_cutoff is not None else data
+        data = data[..., :z_spatial_cutoff] if z_spatial_cutoff is not None else data
         m, s = np.mean(data, axis=(0,2,3), keepdims=True), np.std(data, axis=(0,2,3), keepdims=True)
 
     else:
@@ -357,6 +358,7 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True, spat
         data = [np.concatenate(uvw, axis=1) for uvw in data]
         data = np.stack(data, axis=1)
         data = data[:, :, :, :spatial_cutoff] if spatial_cutoff is not None else data
+        data = data[..., :z_spatial_cutoff] if z_spatial_cutoff is not None else data
         m, s = np.mean(data, axis=(0,3,4), keepdims=True), np.std(data, axis=(0,3,4), keepdims=True)
     
     data = norm(data, m, s)
@@ -365,9 +367,38 @@ def get_loaders_vf_fm(vf_paths, batch_size, dataset_, jump=1, all_vel=True, spat
         if time_cutoff is not None:
             train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump], all_vel, patch_dims, multi_patch, zero_pad), batch_size=batch_size, shuffle=True)
         else:
-            train_dataloader = DataLoader(dataset_(data[::jump], all_vel, patch_dims), batch_size=batch_size, shuffle=True)
+            train_dataloader = DataLoader(dataset_(data[::jump], all_vel, patch_dims, multi_patch, zero_pad), batch_size=batch_size, shuffle=True)
     else:
         train_dataloader = DataLoader(dataset_(data[:time_cutoff:jump], all_vel), batch_size=batch_size, shuffle=True)
+       
+    return train_dataloader
+
+def get_loaders_wp_fm(wall_pres_path, nx, nz, nstep, batch_size, dataset_, patch_dims, multi_patch, zero_pad, spatial_start=0, spatial_cutoff=None, temporal_cutoff=None):
+    
+    def norm(d, m, s):
+        return (d-m)/s
+
+    data = []
+    
+    def read_data(file_path, nx, nz, nstep):
+        data  = np.fromfile(file_path, dtype=np.float64, count=nx*nz*nstep).reshape((nx, nz, nstep), order='F')
+        return data
+    
+    data = read_data(wall_pres_path, nx, nz, nstep)
+    
+    data = data[spatial_start:spatial_cutoff] if spatial_cutoff is not None else data[spatial_start:]
+
+    m, s = data.mean(), data.std()
+    
+    data = norm(data, m, s)
+
+    if multi_patch is not None:
+        if temporal_cutoff is not None:
+                train_dataloader = DataLoader(dataset_(data[..., :temporal_cutoff], patch_dims, multi_patch, zero_pad), batch_size=batch_size, shuffle=True)      
+        else:
+            train_dataloader = DataLoader(dataset_(data, patch_dims, multi_patch, zero_pad), batch_size=batch_size, shuffle=True)
+    else:
+        train_dataloader = DataLoader(dataset_(data, patch_dims), batch_size=batch_size, shuffle=True)
        
     return train_dataloader
 

@@ -491,6 +491,63 @@ class Patched_Dataset(Dataset):
         x1 = np.concat([x1, x_coord, z_coord], axis=0)
         
         return np.empty_like(x1), x1
+    
+class Patched_Dataset_W(Dataset):
+    def __init__(self, data, patch_dims, multi_patch=False, zero_pad=True, *args) -> None:
+        super().__init__()
+        self.zero_pad = zero_pad
+        if multi_patch:
+            print("Using Multi-patch")
+            self.sample_patch_dims = patch_dims[-1]
+        self.multi_patch = multi_patch
+        self.patch_dims = patch_dims
+        self.space_ress = data.shape[:2]
+        self.time_steps = data.shape[-1]
+        # self.ind_cumprod = np.concatenate((((np.cumprod((self.data.shape[:1] + self.data.shape[2:])[::-1]))[::-1])[1:], np.ones(1))).astype(int)
+        if not multi_patch:
+            assert len(self.patch_dims) == len(self.space_ress), "The patch dims list does not match the space res list"
+            assert sum([self.patch_dims[i] > self.space_ress[i] for i in range(len(self.patch_dims))]) == 0, "the patch dims should be lower than space res!"
+        self._preprocess(data,'data')
+
+    def _preprocess(self, data, name):#_preprocess(self, data, cutoff, name):
+        if self.multi_patch:
+            patch0, patch1 = self.patch_dims[-1][0], self.patch_dims[-1][1]
+        else:
+            patch0, patch1 = self.patch_dims[0], self.patch_dims[1]
+        k0, k1 =  floor(self.space_ress[0]/patch0),  floor(self.space_ress[1]/patch1)
+        pad0, pad1 = (k0+1)*patch0 - self.space_ress[0], (k1+1)*patch1 - self.space_ress[1],
+        data = np.pad(data, ((pad0,pad0),(pad1,pad1),(0,0)), mode='constant', constant_values=0.) if self.zero_pad else np.pad(data, ((pad0,pad0),(pad1,pad1),(0,0)), mode='wrap')
+        x_coord, z_coord = np.linspace(-1, 1, self.space_ress[0]+2*pad0), np.linspace(-1, 1, self.space_ress[1]+2*pad1)
+        x_coord, z_coord = x_coord[:, None] * np.ones((self.space_ress[0]+2*pad0, self.space_ress[1]+2*pad1)),\
+                           z_coord[None, :] * np.ones((self.space_ress[0]+2*pad0, self.space_ress[1]+2*pad1))
+        setattr(self, name, (data).astype(np.float32))
+        setattr(self, "x_coord", (x_coord).astype(np.float32))
+        setattr(self, "z_coord", (z_coord).astype(np.float32))
+        setattr(self, "pads", (pad0, pad1) )
+        
+    def __len__(self):  
+        return self.time_steps #* np.prod(self.space_ress) 
+    
+    def __getitem__(self, index):
+        patch_dims = self.patch_dims if not hasattr(self, "sample_patch_dims") else self.sample_patch_dims
+        time_ind, h_ind, w_ind = index, np.random.randint(0, self.space_ress[0]+ 2*self.pads[0] - patch_dims[0]), np.random.randint(0, self.space_ress[1]+ 2*self.pads[1] - patch_dims[1])        
+        time_ind %=  self.time_steps
+        
+        x1 = self.data[..., time_ind]
+        
+        start_indices = [h_ind, w_ind]
+            
+        patches = [range(start_index, start_index + patch_dim) for start_index, patch_dim in zip(start_indices, patch_dims)]
+        
+        x_coord, z_coord = self.x_coord.copy(), self.z_coord.copy()
+        for i, patch in zip(range(0, len(patch_dims)), patches):
+            x1 = x1.take(indices=patch, axis=i, mode='wrap')
+            x_coord = x_coord.take(indices=patch, axis=i, mode='wrap')
+            z_coord = z_coord.take(indices=patch, axis=i, mode='wrap')
+        
+        x1 = np.stack([x1, x_coord, z_coord], axis=0)
+        
+        return np.empty_like(x1), x1
 
 DATASETS = {"WP":None,"KS":None, "WPWS":None, "WPWS_DD":None,
             "Joint" : Joint,
@@ -501,7 +558,8 @@ DATASETS = {"WP":None,"KS":None, "WPWS":None, "WPWS_DD":None,
             "WSVF":None,
             "VFVF":VFVF, "VFVF_P":VFVF_patchify,
             "VFVF_P2": VFVF_patchify_2,
-            "WMAR":WMAR, "WMARR":WMAR_rollout, "Patched":Patched_Dataset}
+            "WMAR":WMAR, "WMARR":WMAR_rollout, "Patched":Patched_Dataset,
+            "Patched_W":Patched_Dataset_W}
 
 
 # class WPWS_Sensor(Dataset):

@@ -681,14 +681,15 @@ def flow_padis(fm : FlowMatcher, cfm_model : torch.nn.Module,
             for _ in range(refine): ##Picard Iteration
                 offset = (np.random.randint(0, high=pad_h+1), np.random.randint(0, high=pad_w+1))
                 x = x.requires_grad_()
-                x = extract_non_overlapping_patches(x, offset=offset, patch_size=patch_size, x_coord=x_coord, z_coord=z_coord)
+                x_patches = extract_non_overlapping_patches(x, offset=offset, patch_size=patch_size, x_coord=x_coord, z_coord=z_coord)
                 
-                v = cfm_model(t, x)
+                v_patches = cfm_model(t, x_patches)
                 
-                x = recombine_non_overlapping_patches(x, dims_of_img, (pad_h,pad_w), offset, patch_size)
-                v = recombine_non_overlapping_patches(v, dims_of_img, (pad_h,pad_w), offset, patch_size)
+                # x = recombine_non_overlapping_patches(x_patches, dims_of_img, (pad_h,pad_w), offset, patch_size)
+                v_recons = recombine_non_overlapping_patches(v_patches, dims_of_img, (pad_h,pad_w), offset, patch_size)
                 
-                x, v = x[:, :ignore_index], v[:, :ignore_index]
+                v = v_recons[:, :ignore_index]
+                # x, v = x[:, :ignore_index], v_recons[:, :ignore_index]
                 
                 scaled_grad, loss = grad_cost_func(meas_func, x, conditioning_per_batch, 
                                                 is_grad_free=False, grad={"t" : t, "v" : v},
@@ -748,15 +749,17 @@ def flow_padis_generalized(fm : FlowMatcher, cfm_model : torch.nn.Module,
                              pad_t_like_x(a_t, x).to(device), pad_t_like_x(b_t, x).to(device)
              
             x_fixed = x.clone().detach()
-            x = extract_non_overlapping_patches(x, offset=offset, patch_size=patch_size, x_coord=x_coord, z_coord=z_coord)
-                           
             x = x.requires_grad_()
-            v = cfm_model(t, x)
             
-            x = recombine_non_overlapping_patches(x, dims_of_img, (pad_h,pad_w), offset, patch_size)
-            v = recombine_non_overlapping_patches(v, dims_of_img, (pad_h,pad_w), offset, patch_size)
-                
-            x, v = x[:, :ignore_index], v[:, :ignore_index]
+            x_patches = extract_non_overlapping_patches(x, offset=offset, patch_size=patch_size, x_coord=x_coord, z_coord=z_coord)
+
+            v_patches = cfm_model(t, x_patches)
+            
+            # x = recombine_non_overlapping_patches(x, dims_of_img, (pad_h,pad_w), offset, patch_size)
+            v_recons = recombine_non_overlapping_patches(v_patches, dims_of_img, (pad_h,pad_w), offset, patch_size)
+            
+            v = v_recons[:, :ignore_index]
+            #x, v = x[:, :ignore_index], v[:, :ignore_index]
             
             scaled_grad_list, loss_list = grad_cost_func(meas_func_list, x, conditioning_per_batch_list, 
                                             is_grad_free=False, grad={"t" : t, "v" : v},
